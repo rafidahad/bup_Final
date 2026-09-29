@@ -66,7 +66,7 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 | M6 | Observability: Prometheus, Grafana, logs, health | Done (Prometheus scraping, Grafana dashboard provisioned, /api/health, health view) |
 | M7 | DevOps: Dockerfile, full compose, CI | Done locally (compose healthy); CI pushed, first run pending |
 | M8 | Load testing (k6) | Done (3 runs, see results) |
-| M9 | Architecture diagram, README, demo script, final check | Not started |
+| M9 | Architecture diagram, README, demo script, final check | In progress (README + diagram + demo script done) |
 | Next | Learned forecast, LLM explanations, tuning (plan §25) | Deferred |
 
 ## Simulator semantics (verified by probes)
@@ -165,6 +165,29 @@ Findings: the limit is CPU in the single backend process (one process by design:
 | Backend dependency unavailable → retry / cached state / degraded | (a) simulator fault `unavailable` 10 s while running; (b) `docker compose stop simulator-api` 10 s | (a) degraded within 2 s, cached snapshot (tick 35) served, circuit breaker limited reads to 9 attempts, recovered ~1 s after expiry (tick 113). (b) health: simulator **down**, backend healthy, `/api/overview` still HTTP 200 from cache; all components healthy again after restart. |
 
 Bugs found by these demos and fixed: (1) a spike did not trigger a replan until the 8-tick cadence → cards had no allocation; now any change in events, multipliers, route/station/depot status or supply forces an immediate re-solve (plan §9.1). (2) During an injected outage the executor retried every shipment of a batch (~0.75 s each) and the controller froze without flagging degraded; now the batch stops at the first write failure and the controller goes degraded. (3) Fallback wording claimed "all cards need review" while the fallback policy (correctly, per PS §11) keeps allocating; wording fixed.
+
+## Demo script (PS §22 story, about 8 minutes)
+
+Setup: `.env` with `SIMULATION_SPEED=1`, `FUELOPS_MODE=auto`, an operator token; `docker compose up -d --build`; open the app, Grafana, and this list. Lab → Reset, then Run.
+
+| # | PS §22 step | Do / show |
+|---|---|---|
+| 1 | Normal operations | Overview: tank wall filling, routes with fuel moving, demand served 100%. |
+| 2 | Operator dashboard | Walk the views; System health all green, p95 latency, prediction error. |
+| 3 | Demand starts increasing | Incidents and lab → Crisis event: demand spike, Karnaphuli, ×2.0, 60 ticks → Start. |
+| 4 | System detects risk | Recommendations → "Detected now": anomalous demand (z-score) and the spike signal; incident "Replanned". |
+| 5 | Intelligence predicts shortage | Card: "runs out in about N h", stockout risk %, observed demand noise and sample size. |
+| 6 | Allocation recommendation generated | Card: liters, depot, route, arrival time, binding constraint. |
+| 7 | Operator inspects recommendation | Open "Constraints and alternatives"; confidence below 50% → "Needs your review" (PS §11). |
+| 8 | Allocation is simulated | Risk bars "Now" vs "If sent"; unmet liters before → after. Approve and send. |
+| 9 | Crisis event occurs | Lab: route disruption on Patiya → Karnaphuli (or combined crisis: add a supply shortfall). |
+| 10 | System adapts | Route drawn dashed "disrupted"; replan; recommendation switches to Gazipur → Karnaphuli; no FAILED shipments (disruption guard). |
+| 11 | Failure injected | Lab → Software failure: unavailable, 15 s (or stop the simulator container, or switch intelligence off). |
+| 12 | Monitoring detects failure | Amber banner "Simulator unreachable, showing data from N s ago"; System health: simulator degraded; Grafana: degraded = 1, read failures. |
+| 13 | Fallback / recovery activates | Cached state stays visible; circuit breaker; with intelligence off the rule policy keeps allocating. |
+| 14 | Operations continue | Incident "Recovered"; banner clears; decisions continue; Decisions view shows the full audit trail. |
+
+Evidence to have open: Results and Load testing sections of this log, the hindsight comparison (LP within 3 L of the best possible over 7 days), CI run, Grafana dashboard.
 
 ## Next up
 

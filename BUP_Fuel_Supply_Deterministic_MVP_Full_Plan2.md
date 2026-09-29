@@ -2,12 +2,26 @@
 
 **Document type:** Implementation plan only. No application is built by this document.  
 **Prepared:** 29 September 2026.  
-**User requirements:** Complete MVP; no AI or machine learning; no artificial implementation deadline; deterministic methods and optimization wherever justified.  
+**User requirements:** Complete, in this phase, every part of the MVP that requires no AI or machine learning; parts that would require AI/ML are deferred to the next phase (§25). No artificial implementation deadline; deterministic methods and optimization wherever justified.  
 **User-selected UI stack:** shadcn/ui with Tailwind CSS, on React + TypeScript + Vite.  
 **Primary reference:** `BUP_Fuel_Supply_Simulator_Integration_and_Interaction_Guide.md`, supplied by the user, all 16 pages / 689 text lines reviewed.  
 **Target simulator:** `asifmahmoud414/bup-fuel-supply-simulator:1.0.0`, as specified in the guide.
 
 **Validation status:** Source-document and official library-documentation review completed. Runtime contract probes, application tests, solver benchmarks, and simulator experiments described below are planned work, not completed results.
+
+### Revision 3 — changes from design review
+
+| # | Review finding | Where the plan changed |
+|---|---|---|
+| 1 | Total supply is probably below total demand; this decides the design. | New probe C00 and §5.4 supply-adequacy analysis; §9.7 objective reframed around "every liter consumed, none lost or stranded"; S12 promoted from edge case to main regime. |
+| 2 | Holding all dispatch on `stale_data` empties station tanks within about one real minute. | §10.1, §12.1: degraded mode keeps dispatching conservatively from an estimated state; server-side POST validation is the safety net, and a 409 costs nothing. |
+| 3 | MILP binaries are unnecessary. | §9.2–9.5, §9.7: plain LP with unmet-demand weights that fall over time and no terminal-stock reward; aggregate flow split into `max_shipment` chunks after solving. |
+| 4 | Planning cadence is over-engineered. | §7.1, §9.1: replan every 8 ticks or on events; three snapshot states instead of five; no before/after skew reads; revalidate right before each POST. |
+| 5 | The no-ML rule conflicts with guide page 2. | **Resolved by owner (29 Sep 2026):** this phase builds everything that needs no AI/ML; the guide's history-driven "predictive capabilities / continuously improve" requirement moves to the next phase (§1.2, §25). History is used for validation and residual reporting only; safety margins are hand-set (§8.3). `demand_multiplier` is read directly from `/v1/stations`. |
+| 6 | No upper-bound benchmark. | §9.9, §15.3, §16: perfect-hindsight LP on recorded demand; report the share of the baseline-to-ideal gap closed. |
+| 7 | Phase order delays the first scored run. | §17 rewritten as milestones built around a working slice: threshold policy first, then LP, faults, a trimmed dashboard, and hardening last. |
+
+The probe list (§4.4) and execution-safety rules (§10.3–10.7) are unchanged apart from the additions noted above.
 
 ### Navigation
 
@@ -20,9 +34,10 @@
 - [Safe execution](#10-decision-loop-and-safe-shipment-execution)
 - [Dashboard and workflows](#13-dashboard-and-operator-workflows)
 - [Benchmark pipeline](#16-reproducible-scenario-and-benchmark-pipeline)
-- [Implementation phases](#17-implementation-phases-and-completion-gates)
+- [Implementation milestones](#17-implementation-milestones-and-completion-gates)
 - [Definition of done](#22-final-definition-of-done)
 - [Sources and handoff](#24-reference-index-and-copy-ready-implementation-sources)
+- [Next phase: AI/ML extensions](#25-next-phase-ai-ml-extensions-deferred-not-in-this-phase)
 
 ## 1. Executive decision
 
@@ -60,6 +75,18 @@ The MVP should achieve the first, support the second, and never misrepresent it 
 
 If the solver stops early with a feasible incumbent, display **“Feasible; optimality not proven.”** If a fallback rule generates the plan, display **“Rule-based fallback.”** If conservative capacity rules restrict the feasible set, disclose that the optimality claim applies to that restricted model.
 
+### 1.2 Phase boundary: no AI/ML now, AI/ML next
+
+**This phase completes every part of the MVP that requires no AI or machine learning.** Anything that would require AI/ML is deferred to the next phase (§25), not dropped. The deterministic system must be complete and scored on its own before that phase starts.
+
+| Where AI/ML would usually go | What this phase uses instead | Next phase (§25) |
+|---|---|---|
+| Demand forecasting | The published demand-profile formula (§8.2) × hour factor × region factor × multiplier, plus a hand-set stress multiplier (§8.3). | Forecasts learned from demand history. |
+| Decision policy (RL, learned policy) | Receding-horizon linear optimization with SciPy/HiGHS (§9); mixed-integer only if a verified simulator rule needs integers. | Learned or RL policies benchmarked against the LP. |
+| "Continuously improve" | Re-solving every decision cycle, plus offline sensitivity sweeps that a person tunes by hand (§16). | Automatic tuning of margins and parameters from observed outcomes. |
+| Explanations (LLM) | Text templates filled from binding constraints (§13.4). | Optional LLM-written summaries, grounded in the same recorded data. |
+| Use of history | Validation and residual reporting only (§8.1). | Training data for forecasting and tuning. |
+
 ## 2. Authority, requirements, and unresolved scope
 
 The supplied document explicitly says it is an **integration and interaction guide**. It does not supply the official participant brief, scoring weights, deliverables, mandatory technology, presentation length, or submission rules. Do not invent those requirements.
@@ -78,7 +105,7 @@ This plan uses four labels:
 - Evaluation horizon and whether judging uses normal running speed, controlled stepping, or both.
 - Actual score formula and weights, including any fairness, delivery-volume, or allocation-count penalties.
 - Whether scheduled public events may be used proactively.
-- Whether automated operation, predictive capabilities, or AI/ML are explicitly mandatory. Rule-based future projections provide predictive functionality, but an explicit ML requirement would need separate resolution.
+- The guide (page 2, line 29) asks participants to "use the historical and simulated data … to build predictive capabilities and continuously improve your decisions." This phase covers the rule-based part: formula projections and re-solving every cycle. Learning from history is deferred to the next phase (§25). Confirm with organizers whether this phase alone is acceptable for judging.
 - Required submission format, deployment constraints, demo length, and allowed dependencies.
 - Whether organizers change seeds or image versions, and how they provide that configuration.
 
@@ -120,7 +147,7 @@ References: guide §§1–3, §5, §6, §7; especially lines 17, 75–97, 309–
 
 ### 3.2 Explicit exclusions
 
-- LLMs, chatbots, agents making shipping decisions, model training, neural networks, reinforcement learning, or learned forecasting.
+- In this phase: LLMs, chatbots, agents making shipping decisions, model training, neural networks, reinforcement learning, learned forecasting, and safety margins or parameters derived automatically from history. These are deferred to the next phase (§25), not dropped.
 - Truck fleets, driver schedules, traffic APIs, geographic distances, and road-path routing: the simulator does not model these.
 - Fuel prices, profits, emissions, procurement orders, monetary transport costs, or budgets: none are defined in the guide.
 - New depots, stations, or routes; fuel transfers between stations or between depots.
@@ -194,8 +221,11 @@ Admin knowledge must not leak into the operational planner. A testing service ma
 
 For each probe: reset, pause, record initial state, perform the smallest relevant action, step deliberately, read public state, and use admin audit only to diagnose ordering. Save requests and observations as fixtures.
 
+**Run C00 first; it takes about one minute and decides the design regime (§5.4).** Of the rest, only C01–C04, C06, C10, and C15 block the first working slice (Milestone 1, §17). The remaining probes can run alongside later milestones.
+
 | ID | Question | Required evidence |
 |---|---|---|
+| C00 | Is total supply enough for total demand? | Sum `/v1/supply-arrivals` quantities by depot and fuel; add starting depot and station stock; divide by projected network demand per day; compare with the span of the supply schedule. |
 | C01 | Does inventory deduct at acceptance or departure? | Depot values before POST, after POST, after first step. |
 | C02 | When exactly does a shipment depart and arrive? | Created/departure/arrival ticks for transit lengths 2, 3, and 4. |
 | C03 | In what order do events, supplies, departures, arrivals, and demand execute? | Boundary-tick observations and audit entries. |
@@ -214,6 +244,7 @@ For each probe: reset, pause, record initial state, perform the smallest relevan
 | C16 | How can external reset be recognized? | Notice, tick rollback, reused IDs, same scenario/seed, missing allocation keys. |
 | C17 | What are precision and history-return ordering rules? | Fractional quantities, sorting behavior, partial windows. |
 | C18 | How are failed shipments refunded and dispatch reservations released? | Failure-time depot inventory and subsequent request acceptance. |
+| C19 | Is realized demand identical across runs under different policies? | Run no-replenishment and threshold policies from reset with the same event recipe; compare demand-history rows. Identical demand makes the hindsight bound (§9.9) valid. |
 
 ### 4.5 Known documentation inconsistencies
 
@@ -223,7 +254,7 @@ For each probe: reset, pause, record initial state, perform the smallest relevan
 - The `stale_data` fault is described as adding a header. Do not claim it necessarily returns an older snapshot.
 - The exact demand-jitter distribution and reproduction algorithm are not supplied. A seed alone is insufficient to recreate them.
 
-**Phase 0 exit gate:** a versioned semantics document separates confirmed behavior from remaining assumptions; no optimizer constraint depends silently on an unresolved behavior.
+**Milestone 0 exit gate:** the semantics section of `devlog.md` separates confirmed behavior from remaining assumptions; no optimizer constraint depends silently on an unresolved behavior.
 
 ## 5. Domain model and world configuration
 
@@ -262,9 +293,31 @@ Tongi has only Gazipur as a supplier. Cox’s Bazar has only Patiya. Mirpur and 
 
 ### 5.3 Supply
 
-The baked scenario contains 22 arrivals: four initial arrivals at ticks 12–20 and eighteen recurring arrivals described as spaced 64 ticks apart. Read actual rows from `/v1/supply-arrivals` for exact timing, destination, fuel, and quantity.
+The baked scenario contains 22 arrivals: four initial arrivals at ticks 12–20, then three cycles of six arrivals (one per depot/fuel, 4 ticks apart) starting at ticks 64, 128, and 192. The last arrives at tick 212 (C00, §5.4). Read actual rows from `/v1/supply-arrivals` for exact timing, destination, fuel, and quantity.
 
 Do not generate an infinite recurring schedule from this description. After the final listed supply, project only existing stock unless additional arrivals are actually observed.
+
+### 5.4 Supply adequacy — the regime decision
+
+**C00 measured on 29 Sep 2026** against the live `baseline` scenario (seed 12345):
+
+| Quantity | Measured / estimated | Basis |
+|---|---:|---|
+| Network demand | ≈ 93,000 L/day (estimate) | Profile daily liters × regional factor × mean hour factor (urban 0.95, highway 0.975, industrial and regional 1.0). |
+| Starting stock, depots + stations | 338,000 L ≈ 3.6 days | Live `/v1/depots` + `/v1/stations`. |
+| 22 supply arrivals | **216,000 L ≈ 2.3 days** | Live `/v1/supply-arrivals`: 4 initial arrivals (ticks 12–20), then 3 cycles of 6 arrivals (one per depot/fuel) starting at ticks 64, 128, 192. |
+| Supply schedule span | **ticks 12–212 ≈ 2.2 days** | Last arrival `supply-306` at tick 212. The guide's "18 arrivals spaced 64 ticks apart" means 3 cycles 64 ticks apart, not 18 gaps of 64 ticks. |
+| Total fuel in the world | ≈ 554,000 L ≈ 5.9 days | Diesel ≈ 6.1 days, petrol ≈ 5.5 days, octane ≈ 6.5 days. |
+| By region | Dhaka ≈ 6.7 days, Chattogram ≈ 5.3 days | Gazipur-side fuel vs Dhaka demand; Patiya-side fuel vs Chattogram demand (demand ×1.08). |
+
+So the world holds about 6 days of fuel, and all resupply is delivered within the first 2.2 days. Any run longer than about 6 simulated days (≈ 72 real seconds at default speed) ends in structural shortage, however good the controller. Chattogram runs short about 1.4 days before Dhaka unless fuel moves across regions. **Supply is the binding limit for any long run**, and the planner's job changes:
+
+- From "avoid stockouts" to **"make every liter get consumed somewhere; lose none to overflow, and strand none in the wrong depot."**
+- Cross-region routes (`route-gazipur-karnaphuli`, `route-patiya-mirpur`) become important for rebalancing between regions, not just as fallbacks.
+- Depot overflow at supply arrival is a direct loss. Drain depots ahead of large arrivals.
+- Unmet demand is unavoidable, so the score depends on how completely the available fuel is delivered.
+
+Runs shorter than about 5 simulated days are limited by timing, dispatch capacity, and station tank size rather than total fuel. The same LP objective (§9.7) covers both regimes; only the reported expectations change. Every report states the run length in simulated days next to the 5.9-day fuel ceiling.
 
 ## 6. Recommended architecture and technology
 
@@ -301,13 +354,13 @@ The browser never holds the operational simulator client. All manual and automat
 |---|---|---|
 | Backend | Python + FastAPI + Pydantic | Typed contracts, HTTP endpoints, straightforward numerical integration. |
 | Simulator client | HTTPX async client | Reusable connections, explicit timeouts, async reads and streaming. |
-| Optimization | SciPy interfaces to HiGHS | Linear programming first where valid; mixed-integer programming for exact piecewise rules. |
-| Persistence | SQLite with migrations | Sufficient for one local participant application and durable intents. |
+| Optimization | SciPy `linprog(method="highs")` | Plain LP (§9.4); no integer variables, so solves take milliseconds. |
+| Persistence | SQLite | Sufficient for one local participant application and durable intents. Add a migration tool only when the schema changes after the first release. |
 | Frontend | React + TypeScript + Vite | Interactive operational views without a separate server-rendering requirement. |
 | UI components and styling | shadcn/ui + Tailwind CSS | User-selected component foundation, with a shared operations-dashboard theme. |
 | Charts/network | SVG and a small chart library if needed | Six routes do not require a geographic mapping platform. |
 | Backend tests | pytest | Pure-model, integration, and benchmark assertions. |
-| UI verification | Playwright | Critical operator flows, error states, keyboard and mobile checks. |
+| UI verification | Playwright (Milestone 5) | Critical operator flows, error states, keyboard and mobile checks; deferred until after a score exists. |
 | Packaging | Docker Compose | Official simulator plus application; one documented startup path. |
 
 Pin mutually compatible stable dependency versions and lockfiles during implementation. This plan does not prescribe an untested version combination. Do not install ML frameworks.
@@ -355,14 +408,11 @@ fuel-operations/
     tests/
   scenarios/               # versioned test recipes, not simulator replacements
   benchmarks/              # runner and report specification
-  docs/
-    simulator-contract.md
-    architecture.md
-    optimization-model.md
-    operations.md
-    demo.md
-  reports/                 # generated, timestamped benchmark outputs
+  reports/                 # generated, timestamped benchmark outputs (CSV/JSON)
+devlog.md                  # the single project log: progress, simulator semantics, decisions, results
 ```
+
+Project documentation lives in one Markdown file, `devlog.md` (owner decision, 29 Sep 2026). Contract semantics, model notes, operations notes, and demo steps go there as sections, not as separate files. `README.md` holds only startup instructions.
 
 ## 7. State collection, freshness, and persistence
 
@@ -373,15 +423,15 @@ Each planning snapshot contains:
 - Application run ID and simulator scenario/version/seed.
 - Start and end observed ticks, simulation time, and tick size.
 - Depot, station, route, region, supply, event, and allocation data.
-- Per-response receive time, stale header, error, and content hash.
-- Snapshot quality: `CONSISTENT`, `BOUNDED_SKEW`, `STALE`, `INCOMPLETE`, or `RESET_UNCERTAIN`.
+- Per-response receive time, stale header, and error.
+- Snapshot quality: `FRESH`, `DEGRADED` (stale-flagged, partial, or estimated from the last good snapshot), or `RESET_UNCERTAIN`.
 - Existing pending/in-transit commitments and unresolved local intents.
 
-Collect independent REST resources concurrently, with a bounded connection pool. Read `/v1/instance` before and after collection to estimate tick skew. This is a consistency heuristic, not an atomic-snapshot guarantee.
+Collect independent REST resources concurrently, with a bounded connection pool. No before/after `/v1/instance` skew reads are needed. Tanks hold 70–150 ticks of demand and lead times are 3–5 ticks, so a snapshot a few ticks inconsistent loses almost nothing in plan quality.
 
-In paused tests, require the same tick before and after. In live mode, bounded skew may be unavoidable. Record it, validate relevant resources again before dispatch, and stop rather than combining severely inconsistent observations.
+What matters is the action, not the snapshot. **Immediately before each POST, re-read the source depot and destination station** and clip the quantity to current source stock and destination headroom. The server validates every POST as well (§10.7), and a rejected request never becomes an allocation.
 
-Do not create an endless retry loop seeking an impossible same-tick snapshot under injected latency.
+Only `RESET_UNCERTAIN` blocks dispatch. `DEGRADED` dispatches conservatively (§12.1).
 
 ### 7.2 Notifications and polling
 
@@ -441,9 +491,11 @@ Store decision inputs and immutable request bodies before sending. Separate hist
 
 ### 8.1 No-ML boundary
 
-Use fixed documented demand profiles, observed multipliers, known event schedules, arithmetic, and configurable safety assumptions. No fitted coefficients, trained prediction model, or learned policy is required.
+Use fixed documented demand profiles, observed multipliers, known event schedules, arithmetic, and hand-set safety assumptions. No trained prediction model, fitted regression, neural network, or learned policy.
 
-History supports validation, residual reporting, and benchmarking. For this MVP, do not silently introduce adaptive training under a different name.
+**Use of history in this phase: validation and residual reporting only.** Record `actual − nominal` per station/fuel and show it in reports and plan explanations so a person can judge the formula and tune margins by hand. History never feeds back into decisions automatically; that is the next phase (§25).
+
+`demand_multiplier` is returned directly by `/v1/stations` and already includes active spikes. Read it; do not estimate it with a filter or state estimator.
 
 ### 8.2 Nominal demand
 
@@ -478,18 +530,18 @@ Verify inclusive hourly boundaries. If a configured tick crosses an hour boundar
 
 The guide's noise values do not establish a probability distribution or hard upper bound. Do not label `nominal × (1 + noise)` a guaranteed maximum without evidence.
 
-### 8.3 Safety envelope
+### 8.3 Safety envelope (hand-set)
 
-Provide explicit, deterministic policy parameters:
+Provide explicit, deterministic policy parameters, set by a person:
 
-- Demand stress multiplier above nominal.
+- Demand stress multiplier above nominal (start 1.0; the guide's noise parameters, 0.08–0.12, suggest trying 1.1).
 - Additional delivery-delay allowance in ticks.
-- Target coverage buffer expressed in simulated minutes/hours.
-- Optional extra coverage for stations with only one route.
+- Target coverage buffer expressed in simulated hours.
+- Optional extra coverage for single-route stations (Tongi, Cox's Bazar).
 
-Version these values and run sensitivity comparisons. They are engineering assumptions, not measured probabilities or guaranteed service levels. Convert durations using actual tick size.
+Version these values and choose them through offline sensitivity sweeps (§16) that a person reviews; the residual report (§8.1) informs that choice. They are engineering assumptions, not measured probabilities or guaranteed service levels. Convert durations using actual tick size.
 
-Use either a documented stressed demand trajectory or separate named nominal/stress scenarios. Do not mix several unrelated buffers invisibly.
+Under supply scarcity (§5.4), buffers only decide **where** scarce fuel waits; they cannot create fuel. Keep them small.
 
 ### 8.4 Events and double-counting prevention
 
@@ -539,26 +591,28 @@ Use receding-horizon optimization:
 5. Execute only actions selected for the current decision epoch.
 6. Observe actual results and solve again.
 
-Start evaluation with a 96-tick horizon at the default tick size, and compare 48, 96, and 192 ticks. These are experiments, not established optimal settings. Expose horizon in simulated hours so non-default tick sizes remain meaningful.
+**Cadence:** replan every 8 ticks (2 simulated hours at default), and immediately on a new public event, an allocation turning `FAILED`, a supply-row change, or a reset notice. Coalesce triggers so at most one cycle runs at a time. Tanks hold 70–150 ticks of demand against 3–5 ticks of lead time, so replanning more often gains almost nothing.
 
-The horizon should cover relevant lead times and demand peaks. Use a terminal-coverage objective or extended tail to reduce end-of-horizon shortsightedness. Near the end of a fixed evaluation, distinguish real post-evaluation service needs from arbitrary terminal stock rewards.
+Start evaluation with a 96-tick horizon at the default tick size, and compare 48, 96, 192 ticks, and the full remaining supply schedule. The LP (§9.4) is cheap enough for all four. These are experiments, not established optimal settings. Expose horizon in simulated hours so non-default tick sizes remain meaningful.
+
+The horizon should cover lead times, demand peaks, and at least the next supply arrival at each depot. **Do not reward stock held at the end of the horizon**; that reward is what breaks the LP's greedy-service property (§9.4). End-of-horizon myopia is handled by replanning and by a horizon long enough to see the next supply arrival.
 
 ### 9.2 Variables and indices
 
-Indices: depot `d`, station `s`, fuel `f`, route `r`, planning offset `k`, and allocation slot `j` where individual requests must be modeled.
+Indices: depot `d`, station `s`, fuel `f`, route `r`, planning offset `k`. No allocation-slot index: shipment count is not scored, so the model plans aggregate flow and splits it afterward (§9.5).
 
-Suggested variables:
+All variables are continuous:
 
 | Variable | Meaning |
 |---|---|
-| `x[r,f,k,j] ≥ 0` | Liters submitted on route r in allocation slot j at offset k. |
-| `z[r,f,k,j] ∈ {0,1}` | Optional slot-used flag, needed for shipment-count minimization. |
+| `x[r,f,k] ≥ 0` | Total liters submitted on route r for fuel f at offset k. |
 | `D[d,f,k] ≥ 0` | Depot inventory at a precisely defined phase of tick k. |
 | `I[s,f,k] ≥ 0` | Station inventory at a precisely defined phase of tick k. |
 | `y[s,f,k] ≥ 0` | Demand actually served in the model. |
 | `u[s,f,k] ≥ 0` | Unmet demand, with `y + u = demand`. |
-| `b[s,f,k] ∈ {0,1}` | Shortage branch selector where exact automatic consumption requires it. |
-| `w[d or s,f,k] ≥ 0` | Overflow only if the simulator actually discards excess stock. |
+| `w[d or s,f,k] ≥ 0` | Overflow only if the simulator actually discards excess stock (C06). |
+
+This removes roughly 1,150+ binaries per 96-tick horizon compared with the previous MILP.
 
 Existing pending and in-transit shipments are commitments, not free decision variables. Cancellation is a separate validated action; do not silently remove pending commitments to make a plan feasible.
 
@@ -587,25 +641,30 @@ station next stock
 
 Do not subtract existing pending stock twice if REST already reflects reservation. C01 and C18 determine these accounting rules.
 
-### 9.4 Exact automatic consumption: avoid a subtle false optimum
+### 9.4 Automatic consumption as a plain LP
 
-The simulator serves available fuel automatically. An optimizer must not gain fictitious flexibility by withholding service today to preserve inventory for tomorrow.
+The simulator serves available fuel automatically: `y = min(A, q)` for pre-demand stock `A` and demand `q`. An optimizer must not gain fictitious flexibility by withholding service today to keep inventory for tomorrow.
 
-For an open station with available pre-demand stock `A` and demand `q`, encode `y = min(A, q)`. One mixed-integer formulation is:
+Get this for free, without binaries, through the objective weights:
 
 ```text
-0 ≤ y ≤ A
-y ≤ q
-y ≥ A - M × b
-y ≥ q - M × (1 - b)
-b ∈ {0, 1}
+0 ≤ y ≤ A,   y ≤ q,   y + u = q
+
+weight on u[s,f,k] = 1 + ε (H − k),   ε > 0, e.g. ε = 1 / (10H)
+no reward for stock remaining at the end of the horizon
 ```
 
-Use a valid tight `M` for the particular station/fuel/tick. This selects `y=A` when supply is limiting and `y=q` otherwise. Outage service and inventory effects must follow C09.
+**Why the LP serves greedily.** Suppose a solution withholds δ liters at tick k while stock is available. Those δ liters can reduce unmet demand at some later tick k′ > k by at most δ, at weight `1 + ε(H − k′)`. That is strictly smaller than the `1 + ε(H − k)` saved by serving now. Serving at k is therefore never worse and usually strictly better, so every optimal solution has `y = min(A, q)`.
 
-A pure LP relaxation can be faster, but `y ≤ A` and `y ≤ q` alone do not force the correct consumption semantics when fairness or terminal-stock objectives are present. Use an LP operationally only after proving that its formulation reproduces the relevant behavior, or label it an approximation and validate proposals independently. An LP relaxation is also useful as an objective bound for tests.
+The argument holds only while nothing else in the objective pays for keeping stock. Specifically:
 
-Similarly, if the simulator clips excess inventory, any overflow variable must reproduce mandatory clipping. It must not allow the optimizer to discard usable stock voluntarily to create headroom.
+- No terminal-stock or coverage reward (§9.1).
+- Any secondary terms (overflow, transit exposure) cost at most a small fraction of the smallest weight gap ε per liter, and neither rewards holding.
+- Fairness is reported as a metric, not optimized inside this LP (§9.7).
+
+The independent trajectory replay (§16.5) checks `y = min(A, q)` on every accepted plan anyway.
+
+Outage service and inventory effects must follow C09. If the simulator clips excess inventory (C06), model overflow `w ≥ stock + inflow − capacity` with a small positive cost. Because discarding fuel never frees anything useful, the LP never discards voluntarily; the replay test checks this too.
 
 ### 9.5 Required constraints
 
@@ -617,7 +676,7 @@ Similarly, if the simulator clips excess inventory, any overflow variable must r
 | Source availability | Reserve/dispatch only fuel available at the relevant phase. |
 | Depot capacity | Respect observed capacities and confirmed arrival overflow semantics. |
 | Dispatch budget | Sum all fuel/route quantities in the exact accounting window established by C04. |
-| Per-allocation route limit | Each `x[r,f,k,j] ≤ route.max_shipment`; do not impose this on aggregate route flow. |
+| Per-allocation route limit | Applied after solving: split each `x[r,f,k]` into `ceil(x / max_shipment)` requests. Do not cap aggregate route flow. |
 | Destination submission check | Each immediate request must satisfy current API headroom validation. |
 | Destination arrival capacity | Existing and new incoming shipments must be considered at arrival times. |
 | Lead times | Include verified acceptance-to-departure delay and route transit time. |
@@ -626,9 +685,7 @@ Similarly, if the simulator clips excess inventory, any overflow variable must r
 | Finite supply | Use only observed future arrivals, with known delay/shortfall effects. |
 | Execution window | Current actions must still be relevant when they are submitted. |
 
-Allocation slots need an explicitly justified bound. The guide defines no minimum positive shipment volume. For practical dispatch, choose a documented quantity precision and stable consolidation/splitting policy; do not claim a slot-limited model covers every mathematically possible API request sequence without proving that bound sufficient.
-
-An aggregate-flow model may split a planned quantity into valid requests after solving. That split is acceptable only if its ordered execution passes source, dispatch, current headroom, and future-arrival checks. Otherwise repair/re-solve; do not assume splitting preserves feasibility automatically.
+**Splitting:** the solver plans aggregate flow. The executor splits each immediate `x[r,f,0]` into equal chunks no larger than `max_shipment`, using a declared quantity precision. It then submits them in order, re-reading source stock and destination headroom before each POST and clipping the quantity when needed. If a chunk is rejected, stop that route/fuel and let the next replan handle the remainder. Do not assume splitting preserves feasibility automatically.
 
 ### 9.6 Conservative safety restrictions
 
@@ -638,19 +695,25 @@ Track such rules in the plan metadata as **application safety restrictions**. A 
 
 ### 9.7 Objective hierarchy
 
-Until official scoring is supplied, use a configurable lexicographic objective:
+Until official scoring is supplied, use one weighted LP objective:
 
-1. Minimize total unmet liters over the horizon.
-2. Among plans within a small declared tolerance of the best primary value, improve the worst station/fuel service ratio where demand is positive.
-3. Improve terminal coverage within feasible supply and capacity.
-4. Reduce unnecessary allocated volume and transit exposure, then shipment count if supported.
-5. Apply stable ordering/tie-breaking for reproducible plans.
+```text
+minimize   Σ (1 + ε(H − k)) · u[s,f,k]        time-decreasing unmet demand (primary)
+         + c_over · Σ w[·,f,k]                  overflow = fuel lost (c_over < ε)
+         + c_tx   · Σ transit_ticks(r) · x[r,f,k]   transit-exposure tie-break (c_tx · max_transit < ε)
+```
 
-Do not invent monetary costs. Transit exposure may use `liters × transit_ticks` as an explicitly labeled proxy, not currency, distance, emissions, or actual transport expense.
+Under supply scarcity (§5.4) this objective does the right thing automatically. Every liter that can reach demand in the horizon is delivered, overflow is avoided because lost fuel means later unmet demand, and stock moves across regions when the other region would otherwise run dry first.
 
-Solve objective stages sequentially with constraints preserving earlier objective values. Avoid giant arbitrary weights that accidentally sacrifice service for cosmetic preferences.
+Rules:
 
-Display the objectives and tolerances. If official judging weights differ, create a separate policy profile and rerun comparisons rather than claiming the old hierarchy matches the official score.
+- Demand input is the nominal projection plus the §8.3 buffer inside each station's lead-time window.
+- Do not invent monetary costs. Transit exposure is a labeled proxy, not currency, distance, or emissions.
+- Keep secondary coefficients below ε per liter so they cannot trade away service (§9.4).
+- Fairness (worst station/fuel service ratio) is **reported**, not optimized. If the official brief scores fairness, add a separate policy profile with per-station weights and rerun comparisons.
+- Use stable variable ordering for reproducible plans.
+
+Display the objective and coefficients in every plan. If official judging weights differ, create a separate profile rather than claiming this objective matches the official score.
 
 ### 9.8 Solver policy
 
@@ -659,7 +722,7 @@ Display the objectives and tolerances. If official judging weights differ, creat
 - Set a solve deadline derived from measured operational timing; unlimited project time does not imply unlimited decision latency.
 - Check solver status before using result arrays.
 - Independently check finite numbers, bounds, conservation, constraints, and current-action feasibility.
-- Record objective values, solve duration, and MIP gap/dual bound when exposed.
+- Record objective values, solve duration, and solver status.
 - Reject incomplete or invalid solutions and use a fresh-state fallback.
 - Preserve feasibility after numerical rounding; never round upward across a capacity constraint.
 - Avoid a minimum shipment size hidden in code. If operationally useful, configure it and acknowledge it restricts the model.
@@ -674,6 +737,7 @@ Implement these explicit policies:
 | Threshold replenishment | Simple valid comparator using current stock thresholds and feasible routes. |
 | Earliest-shortage rule | Stronger deterministic comparator, also reused as the solver fallback. |
 | Deterministic optimizer | Main policy using time-indexed demand, supply, and commitments. |
+| Perfect-hindsight bound | **Benchmark only.** The same LP solved once over the whole run using the demand actually recorded in a previous identical run (valid only if C19 confirms identical demand). It gives a ceiling no online policy can beat. Never feed recorded demand into the live policy; judges may inject different events. |
 
 For an initial reproducible threshold baseline, use a declared reorder threshold of 30% and order-up-to target of 70% of station/fuel capacity. Count confirmed incoming commitments when calculating the refill amount; keep current API headroom and future receiving feasibility checks. Choose the fastest feasible route, then stable route ID for ties. These percentages are baseline configuration choices, not simulator rules; also report a reasonable threshold sensitivity sweep so the comparison is not against an intentionally weak setting.
 
@@ -687,7 +751,7 @@ Fallback when optimization fails but state is usable:
 4. Select a feasible route and quantity using current source, dispatch, and destination checks.
 5. Submit through the same outbox, then recompute remaining capacity.
 
-If state is stale, incomplete, or reset-uncertain, fallback does **not** mean guessing. Hold new allocations and reconcile.
+If state is stale-flagged or partial, keep dispatching conservatively from an estimated state (§12.1). Hold new allocations only when reset is uncertain, because old-run intents must never leak into a new world.
 
 ## 10. Decision loop and safe shipment execution
 
@@ -701,20 +765,26 @@ on startup:
     keep automatic sending disabled until reconciliation succeeds
     start stream consumer and polling scheduler
 
-on state-change notification or polling deadline:
+every 8 ticks, or on public event / FAILED allocation / supply change / reset notice:
     coalesce work into one coordinator cycle
-    collect a versioned snapshot
-    detect reset, stale responses, missing resources, and ambiguous writes
+    collect a snapshot (FRESH, DEGRADED, or RESET_UNCERTAIN)
     reconcile existing allocations and reservations
-    if snapshot cannot support safe decisions:
-        publish degraded state; do not create new dispatch intents
+    if RESET_UNCERTAIN:
+        publish held state; create no new intents until the run boundary is resolved
     else:
+        if DEGRADED:
+            estimate current state = last good snapshot
+                                     − projected demand since then
+                                     + own shipment ledger (departures/arrivals)
+            apply the conservative quantity factor (§12.1)
         build deterministic projections
-        generate and independently validate a plan
+        solve the LP; replay-validate the plan
         publish plan and reasons
         if automatic mode is enabled:
-            execute current actions serially with freshness checks
-    persist outcomes and schedule the next necessary refresh
+            for each immediate chunk, in order:
+                re-read source depot and destination station (if reachable)
+                clip quantity; POST; a 409 is free, refresh and continue
+    persist outcomes
 ```
 
 ### 10.2 Operating modes
@@ -736,6 +806,8 @@ PROPOSED → VALIDATED → READY → SENDING
                                                    ├─ exact replay if still appropriate
                                                    └─ HELD_FOR_REVIEW
 ```
+
+**Staging:** Milestones 1–4 (§17) use the minimal safe core: persist the key and body before the POST, and after a timeout, look up the key in the ledger before retrying the identical body. The full state machine above arrives in Milestone 5; the rules in §10.4–10.7 apply from the start.
 
 Persist the immutable body and its idempotency key before the HTTP call. Use a run-scoped unique key under 150 characters, such as `runUUID:decisionSequence:actionSequence`.
 
@@ -853,13 +925,20 @@ Cancellation/replacement proposals must account for whether the original is stil
 
 | Fault | Required response | Recovery gate |
 |---|---|---|
-| `latency` | Bound request concurrency, coalesce refreshes, measure plan age in ticks, avoid overlapping cycles. | Fresh enough snapshot and revalidated actions. |
-| `unavailable` | Preserve local last-known display with age; pause new dispatch; retry public reads with bounded backoff. | Full state and outbox reconciliation. |
-| `error_rate` | Retry transient reads; handle uncertain writes with same immutable key and ledger reconciliation. | Successful authoritative refresh; unresolved writes accounted for. |
-| `stale_data` | Mark flagged data untrusted; invalidate operational cache; hold new allocations by default. | Unflagged refresh of every resource needed for the next action. |
+| `latency` | Bound request concurrency, coalesce refreshes, skip overlapping cycles; **keep dispatching**. | Normal cadence resumes. |
+| `unavailable` | Keep the plan current from the estimated state; retry POSTs of the current plan's immediate chunks with bounded backoff (same keys) so the first chunk lands as soon as the API returns. | Full state and outbox reconciliation. |
+| `error_rate` | Retry transient reads; handle uncertain writes with same immutable key and ledger reconciliation; **keep dispatching**. | Successful authoritative refresh; unresolved writes accounted for. |
+| `stale_data` | Treat flagged responses as `DEGRADED`; **keep dispatching conservatively** (see below). C15 determines whether the flagged body is actually old. | Unflagged refresh. |
 | `stream_disconnect` | Reconnect with bounded backoff; keep REST polling active. | Stream recovered or operational polling verified; full resync after reconnect. |
 
-Keep last-known values visible for diagnosis, but label them with age and degraded status. Holding new dispatch on stale data is an explicit safety policy, not a claim that it maximizes service under every failure.
+**Why not hold.** At default speed, 60 real seconds ≈ 5 simulated days (§12.2), while station buffers are 0.75–1.6 days. A one-minute hold empties every tank. Holding is also unnecessary:
+
+- A rejected POST (404/409/422) never becomes an allocation, so it is not counted in `allocation_failures` (§15.1). The server validates source stock, route, station status, and destination headroom on every POST.
+- The `stale_data` header may only flag responses without replaying old data (C15).
+
+**Conservative degraded dispatch:** plan from the estimated state; multiply immediate quantities by a declared factor (for example 0.7) so an overestimate of headroom wastes little; prefer stations whose estimated shortage is nearest; and record every degraded-mode decision in the plan explanation.
+
+Keep last-known values visible for diagnosis, labeled with age and degraded status.
 
 Fault requests contain `type`, integer `duration_seconds` from 1 through 3600, and optional `parameters`. They start at the current wall time. `latency` accepts `delay_ms` (default 500); `error_rate` accepts `rate` (default 0.25); no parameters are documented for the other three types. Example:
 
@@ -886,6 +965,8 @@ With default settings:
 ```
 
 These are nominal conversions; actual measured tick progress is authoritative. Domain events use ticks. Faults use real seconds. Record both clocks in every resilience result.
+
+Consequence: any fault response that stops dispatch for more than a few real seconds costs whole simulated days of service. Fault handling must degrade, not halt (§12.1).
 
 ### 12.3 Initial configurable performance targets
 
@@ -940,16 +1021,15 @@ Keep custom network SVG and domain charts inside this component system. Define s
 
 ### 13.2 Views
 
+**Milestone 4 builds three views only:**
+
 | View | Required contents and actions |
 |---|---|
-| Overview | Simulation clock, mode, data freshness, service level, unmet liters, six-route network, ranked shortage list. |
-| Station detail | Fuel tanks, capacities, nominal/stressed inventory projection, observed demand, next arrivals, outage state, source options. |
-| Depot detail | Current available stock, capacity, dispatch usage from confirmed semantics, future supplies, dependent stations. |
-| Plans | Snapshot time, horizon, assumptions, solver result, immediate proposals, future tentative actions, approve/recalculate controls. |
+| Overview | Simulation clock, mode, data freshness, service level, unmet liters, supply-adequacy summary (§5.4), six-route network, ranked shortage list, per-station tank levels. |
 | Shipments | Filter by lifecycle, station, depot, fuel; inspect request/arrival times; cancel pending shipments. |
-| Incidents | Public event timeline, connectivity/staleness incidents, response and recovery log. |
-| Test lab | Explicit simulator pause/run/step/reset, event/fault forms, benchmark controls; disabled when another run owns controls. |
-| Reports | Baseline comparisons, per-station service, test metadata, completeness warnings, CSV/JSON export. |
+| Plans | Snapshot time, horizon, objective and coefficients, solver result, immediate proposals, future tentative actions, approve/recalculate controls. |
+
+**Deferred to Milestone 5 or cut:** station detail and depot detail (fold the key numbers into Overview), incidents (show the active event/fault banner on Overview instead), test lab (the CLI harness covers it), and reports (the benchmark CLI writes CSV/JSON).
 
 These may be tabs or routes. Do not duplicate operational state across independent frontend stores.
 
@@ -960,8 +1040,8 @@ These may be tabs or routes. Do not duplicate operational state across independe
 3. **Review manually:** generate plan → review current actions → approve → revalidate snapshot → submit → show partial or complete results.
 4. **Create a manual allocation:** choose station/fuel → show valid depots/routes → enter quantity → validate → persist intent → submit.
 5. **Respond to crisis:** see event → inspect affected station/route → view changed risk → see replanned allocation or explicit infeasibility.
-6. **Recover from outage:** see stale last-known values → controller holds writes → public reads recover → intents reconcile → automatic mode resumes only under configured policy.
-7. **Run a benchmark:** select recipe and policies → review that the simulator will reset → run sequentially → inspect measured results → export.
+6. **Ride through a fault:** see the degraded banner and the estimated values with their age → controller keeps dispatching conservatively → public reads recover → intents reconcile → normal mode resumes.
+7. **Run a benchmark (CLI in Milestones 1–4):** select recipe and policies → confirm reset → run sequentially → inspect measured results → export.
 
 Manual action errors must be understandable: “Only 1,400 L of receiving capacity remains” is better than exposing a raw traceback. Preserve raw simulator codes in expandable diagnostics.
 
@@ -981,6 +1061,8 @@ An explanation must distinguish:
 Do not claim causal shortage prevention from one run alone. Measured “liters saved” needs a controlled comparison.
 
 ### 13.5 Accessibility and UI acceptance
+
+Basic semantics (labels, headers, text-plus-color warnings, no double submit) apply from Milestone 4. Automated Playwright accessibility and mobile checks move to Milestone 5.
 
 - Keyboard-accessible actions, visible focus, labels, and meaningful table headers.
 - Warnings use text/icons as well as color.
@@ -1055,6 +1137,15 @@ unmet reduction %
 
 If baseline unmet is zero, report absolute differences and “percentage reduction not defined”; do not divide by zero or claim an artificial percentage improvement.
 
+**Headline metric: share of the achievable gap closed.**
+
+```text
+gap closed %
+  = (baseline_unmet − policy_unmet) / (baseline_unmet − hindsight_unmet) × 100
+```
+
+`hindsight_unmet` comes from the perfect-hindsight LP (§9.9) on the same scenario. Under supply scarcity (§5.4), much unmet demand is unavoidable, so "unmet reduction %" alone understates a good policy; the gap-closed figure shows how close the policy gets to the best possible. Report it only when C19 confirms identical demand across runs and the event recipe is the same. If the denominator is zero or negative, report absolute values instead.
+
 For service improvement, distinguish **percentage points** from relative percentages. Compare equivalent run horizons and information access. Do not infer total customer counts from liters.
 
 ### 15.4 Result record
@@ -1111,11 +1202,12 @@ Label these results separately. Advance warning is a different information condi
 | S09 | Supply shortfall | Prioritizes under scarcity and preserves conservation. |
 | S10 | Station outage and reopening | No new invalid submissions; verified demand/arrival behavior; recovery measured. |
 | S11 | Overlapping crises | Correctly follows actual event interactions. |
-| S12 | Beyond final listed supply | Shows finite-stock limits; never invents new resupply. |
-| F01 | Latency | Bounded queue, no concurrent writers, measured plan age. |
-| F02 | API unavailability | No blind new allocations; reconciliation after recovery. |
+| S12 | **Main regime:** supply-limited run through and beyond the final listed supply | Near-zero overflow at depots and stations; minimal fuel stranded in a depot while its region's stations are short; cross-region routes used; never invents new resupply. Compare against the hindsight bound. |
+| B01 | Perfect-hindsight bound | Recorded demand from an identical run; LP ceiling for S01 and S12; gap-closed % reported (§15.3). |
+| F01 | Latency | Bounded queue, no concurrent writers, dispatch continues. |
+| F02 | API unavailability | Plan kept current from estimated state; first chunk lands soon after recovery; reconciliation after recovery. |
 | F03 | Probabilistic errors | Safe retries without duplicate logical shipments. |
-| F04 | Stale-data header | Blocks new automatic dispatch by default and explains why. |
+| F04 | Stale-data header | **Dispatch continues** in conservative degraded mode; unmet demand during the fault compared with a hold-dispatch variant. |
 | F05 | Stream connection failure | Polling continues, reconnect resynchronizes state. |
 | R01 | Response lost after accepted allocation | Exactly one simulator allocation for the immutable intent. |
 | R02 | App restart with unknown request outcome | Reconciles before resuming automatic sends. |
@@ -1142,162 +1234,94 @@ A transport test double or local test proxy may reproduce “server accepted, re
 - Two arrivals at different times, proving late stock cannot serve earlier demand.
 - An API headroom constraint binding at request time even when arrival-time space would exist.
 - Multiple same-route allocations demonstrating per-request, not aggregate-route, limits.
-- Counterexample preventing voluntary withholding of service by the model.
+- Counterexample for voluntary withholding: a fixture where holding stock would help a later tick. The decreasing-weight LP must still serve `min(A, q)` at every tick (§9.4).
+- A depot-overflow fixture: a large supply arrival into a nearly full depot. The LP must ship ahead of the arrival rather than let fuel overflow.
 - Supply overflow and station outage cases matching confirmed semantics.
 - Lexicographic priority test: secondary convenience cannot worsen primary service beyond tolerance.
 - Numerical rounding and request-splitting feasibility.
-- Solver objective compared with exhaustive enumeration on small quantized fixtures; label quantization and compare within the same model.
+- Solver objective compared with a brute-force search on small quantized fixtures; label quantization and compare within the same model.
 - Independent trajectory replay of every proposed plan before accepting solver feasibility claims.
 
 Use deliberately small fixtures to test modeling errors. Do not reproduce the optimizer matrix construction verbatim in tests and call that independent verification.
 
-## 17. Implementation phases and completion gates
+## 17. Implementation milestones and completion gates
 
-There is no imposed schedule. Execute in dependency order and advance only when the phase's evidence is complete. Phase 0 is specified in §4.
+There is no imposed deadline, but the order is built around a **working slice**: a policy that ships fuel against the real simulator and produces a score exists from the first day of implementation. Plumbing, dashboard polish, and hardening come after the score exists, never before it.
 
-### Phase 1 — Reproducible project foundation
+Each milestone ends with a runnable system and a recorded benchmark. Advance only when the gate passes.
 
-**Implement:** repository structure, locked dependencies, typed configuration, application health endpoint, database migrations, Compose startup using the guide's simulator service pattern. Bind local services appropriately and keep the simulator image unchanged.
+**Execution scope (owner decision, 29 Sep 2026):** execute now only the components that will **not** receive AI/ML integration later. Components listed as AI/ML targets in §1.2 and §25 are frozen at their current working version and resumed with the next phase:
 
-**Read/copy:** guide §1 lines 50–73 for Compose/startup; official FastAPI lifecycle reference in §24 for resource ownership.
+| Execute now (no future AI/ML) | Frozen now, resumed with the AI/ML phase |
+|---|---|
+| Simulator client, contract probes, error normalization | Demand projection refinements (§8.2) and residual report |
+| Executor: splitting, headroom, dispatch budget, idempotency, request consolidation | Safety margins and stress profiles (§8.3) |
+| Stepped benchmark harness, metrics, hindsight bound, reports | Decision-policy work: LP horizon sweeps, tuning, fallback refinement (§9); learned/RL policies |
+| Fault handling, degraded mode, SSE consumer, event detection and replan triggers | Crisis-specific planning logic (e.g. pre-positioning for announced disruptions, §11) |
+| Persistence, outbox, restart/reset reconciliation | Automatic parameter tuning |
+| Dashboard (Overview, Shipments, Plans), packaging, demo | Plan explanations (§13.4 templates → optional LLM) |
 
-**Verify:** clean startup from documented instructions; configuration errors explained; state persists across app restarts; simulator health and application health remain distinct.
+The LP planner built in Milestone 2 (measured within 9 L of the hindsight bound over 7 days) stays in use as the current policy without further tuning.
 
-**Guards:** no UI fake data presented as live; no ML dependency; no multiple auto-started controllers.
+### Milestone 0 — Supply adequacy and blocking probes (first hours)
 
-**Deliverables:** reproducible skeleton and setup documentation. No optimization claim yet.
+**Implement:** C00 supply sum (§5.4); probes C01–C04, C06, C10, C15 (§4.4). Minimal scripts; no application framework yet.
 
-### Phase 2 — Typed simulator client and state mirror
+**Read/copy:** guide §§4–5, §7.5–7.6 (step/reset), §8.7; this plan §4.4 and §5.4.
 
-**Implement:** all public read contracts, allocation/cancellation clients, normalized error envelopes, resource freshness metadata, snapshot collection, SSE consumer and polling recovery.
+**Gate:** the semantics section of `devlog.md` records the supply regime (scarce or ample), departure/arrival timing, dispatch-budget window, overflow behavior, replay status code, and what `stale_data` actually does.
 
-**Read/copy:** guide §§4–6; public JSON examples lines 109–303; SSE protocol lines 390–422; HTTPX references in §24.
+### Milestone 1 — Working slice (first day)
 
-**Verify:** all documented resources load; stale flags propagate; stream reconnect performs resync; paused snapshots are consistent; bounded-skew running snapshots are labeled.
+**Implement:**
 
-**Guards:** no invented filtering/pagination; no treating SSE as state; no audit event names used as SSE subscriptions.
+- Minimal typed simulator client: the public reads, `POST /v1/allocations`, error-envelope normalization.
+- Threshold policy (§9.9) running **automatically** against the real simulator.
+- Execution: split into `max_shipment` chunks, re-read source/destination before each POST, persist key+body before sending, look up key after a timeout (§10.3 staging).
+- Step-based test harness: reset → pause → decide → step, for a declared horizon; capture `/v1/metrics` and demand history; write CSV/JSON.
+- No-replenishment baseline through the same harness.
 
-**Deliverables:** integration tests and a trustworthy read-only state API.
+**Gate:** the threshold policy completes a stepped run from reset without crashing; the report shows its service level against no-replenishment. **A score exists.**
 
-### Phase 3 — Durable execution and reconciliation
+**Deferred on purpose:** database migrations, the full outbox state machine, the dashboard, SSE (polling is enough at this stage).
 
-**Implement:** run identity, serialized writer, immutable outbox, key generation, partial-plan handling, cancellation, restart/reset reconciliation, and mode controls.
+### Milestone 2 — LP planner and upper bound
 
-**Read/copy:** guide §5.1 payload lines 320–329, §5.2 validation, §5.4 idempotency, §5.5 cancellation; this plan §10.
+**Implement:** deterministic demand projection (§8.2); residual report and hand-set stress profiles (§8.1, §8.3); time-indexed LP (§9.2–9.7) with the decreasing weights; post-solve split; independent trajectory replay; earliest-shortage fallback; C19 probe; perfect-hindsight bound (§9.9); gap-closed reporting (§15.3).
 
-**Verify:** identical retry creates one allocation; changed body is rejected; lost-response recovery works; old-run intents cannot replay after reset; concurrent manual/auto actions cannot overspend shared resources.
+**Read/copy:** official SciPy `linprog` reference (§24); guide §8.5–8.6; verified probe fixtures.
 
-**Guards:** no new key for an uncertain retry; no assumed cancellation refund; no batch atomicity assumption.
+**Gate:** §16.5 correctness fixtures pass (including withholding and overflow fixtures); LP beats threshold on S01 and S12, or the report explains why not; horizon comparison 48/96/192/full-schedule recorded; hindsight gap-closed % reported.
 
-**Deliverables:** safe end-to-end manual allocation and lifecycle tracking.
+### Milestone 3 — Events and fault handling
 
-### Phase 4 — Baseline and benchmark harness
+**Implement:** SSE consumer with polling fallback; event-triggered replanning (§9.1); crisis handling (§11); degraded-mode dispatch from estimated state (§12.1); remaining probes C05, C07–C09, C11–C14, C16–C18.
 
-**Implement:** no-action and threshold policies, exclusive test ownership, reset/pause/step loop, observation capture, CSV/JSON reports, versioned scenario recipes.
+**Gate:** S02–S12 and F01–F05 executed; F04 shows degraded dispatch beating a hold-dispatch variant (or the report explains why not); R01 and R03 pass (no duplicate shipment after a lost response; no old-run intent after reset).
 
-**Read/copy:** guide §7.5–7.13; event/fault request examples; metrics §4.12; this plan §16.
+### Milestone 4 — Dashboard: Overview, Shipments, Plans
 
-**Verify:** identical stepped runs reproduce documented domain outcomes; baseline sends valid requests; horizon reaches replenishment-dependent behavior; benchmark settings and missing data are recorded.
+**Implement:** FastAPI application endpoints needed by the three views (§14 subset: status, overview, allocations, plans, recalculate, execute, cancel, operating mode); React + TypeScript + Vite with shadcn/ui and Tailwind CSS; the three views in §13.2; observe/manual/automatic modes.
 
-**Guards:** no admin fault bypass by evaluated policy; no preloaded surprise-event knowledge; no fabricated benchmark numbers.
+**Gate:** live data throughout; approve/cancel/recalculate flows work; degraded banner visible during a fault; no duplicate submissions on repeated clicks.
 
-**Deliverables:** a usable baseline report before optimizer work begins.
+### Milestone 5 — Hardening and delivery (after the score exists)
 
-### Phase 5 — Deterministic projection engine
+**Implement, in value order:**
 
-**Implement:** documented demand factors, simulated-clock handling, event transitions, fixed safety parameters, time-indexed stock/supply/arrival projections, shortage calculations, model discrepancy reports.
+1. Full outbox state machine (§10.3), restart reconciliation (R02), reset boundaries, remaining R-scenarios.
+2. SQLite persistence of runs, plans, intents, and history, with gap detection (§7.3–7.5).
+3. Docker Compose packaging, README, runbook, demo script (§20).
+4. Playwright critical-flow and accessibility checks; CSRF/origin guard (§19).
+5. Deferred views (station/depot detail, incidents, test lab, reports) only if time and value justify them.
 
-**Read/copy:** guide §8.5–8.6 tables and station/region fields; verified C01–C13 fixtures; this plan §8.
+**Gate:** the §22 definition of done, with any skipped item explicitly listed as a known limitation.
 
-**Verify:** hour boundaries, non-default tick size, event overlap, no double-counting, incoming arrival timing, outage behavior, and conservation.
+### Next phase — AI/ML extensions (§25)
 
-**Guards:** no learned demand model; no treating noise parameter as a proven bound; no exact jitter prediction from seed alone.
+Not part of this phase. Starts only after Milestone 5's gate passes, against the scored deterministic baseline.
 
-**Deliverables:** deterministic projection API and clear assumption profiles.
-
-### Phase 6 — Optimization model
-
-**Implement:** time-indexed constraints, exact required piecewise behavior, objective hierarchy, solver status reporting, stable variable ordering, independent feasibility validator, splitting/rounding policy, and fallback.
-
-**Read/copy:** official SciPy API signatures in §24, guide §5.2 and §8, and this plan §9. Use verified simulator semantics rather than inferring missing behavior from examples.
-
-**Verify:** hand-solvable fixtures, no fictitious withheld demand, known optimal cases, constraint residuals, timeout behavior, stable repeated plans under pinned settings, and full-network benchmark comparison.
-
-**Guards:** no route aggregate cap mistaken for per-allocation cap; no fake monetary objective; no “optimal” label for a heuristic or incomplete solve.
-
-**Deliverables:** versioned model specification plus executable planning component with correctness evidence.
-
-### Phase 7 — Automatic operating loop
-
-**Implement:** coalesced event-driven planning, polling backstop, plan expiration, fresh-state validation, shared manual/automatic coordinator, bounded solve execution, degraded/hold/recovery state transitions.
-
-**Read/copy:** guide §§6 and 10; this plan §§7, 10, and 12.
-
-**Verify:** no overlapping writers; no unlimited queue growth; good behavior at default speed; old plans rejected after changed state; no writes based on unusable snapshots.
-
-**Guards:** automatic mode must not pause the simulator to conceal performance issues; no CPU-bound solves blocking networking.
-
-**Deliverables:** autonomous end-to-end runs with measured decision latency.
-
-### Phase 8 — Complete operator dashboard
-
-**Implement:** all views and journeys in §13 using React + TypeScript + Vite, shadcn/ui, and Tailwind CSS, backed by the application API; network diagram, risk table, projections, shipment lifecycle, plan review, incidents, and report export. Initialize the shared theme and required shadcn/ui primitives before composing domain screens.
-
-**Read/copy:** typed application schemas from prior phases; guide field names for data mapping; design requirements in §13.
-
-**Verify:** live data throughout; approve/cancel/recalculate flows; stale/loading/error/partial-success states; accessibility and laptop/mobile checks; no duplicate submissions on repeated clicks.
-
-**Guards:** no fictitious routes or metrics; no raw solver implementation jargon in ordinary operator actions; future tentative actions clearly distinguished from submitted shipments.
-
-**Deliverables:** complete manual and automatic user workflows.
-
-### Phase 9 — Crisis and resilience suite
-
-**Implement:** all documented event/fault types in the lab, targeted scenario recipes, retry/restart/reset tests, overlap tests, and normal-speed performance experiments.
-
-**Read/copy:** guide §7.8 event parameter table, §7.9–7.10 fault fields; this plan §§11–12 and §16.
-
-**Verify:** execute all S/F/R scenarios; capture failures and recovery evidence; history gaps correctly flagged; tests remain isolated from ordinary operation.
-
-**Guards:** distinguish wall time from ticks; empty filters must not accidentally affect the whole world; no hidden lab state passed to planner.
-
-**Deliverables:** fault-resilience report and resolved critical integration defects.
-
-### Phase 10 — Optimization evaluation and refinement
-
-**Implement:** horizon/safety-profile comparisons, fairness reporting, solver performance tuning, and evidence-backed policy defaults.
-
-**Read/copy:** official solver method/options documentation; baseline reports and independent replay results; this plan §§9 and 15–16.
-
-**Verify:** compare policies on identical scenarios and action opportunities; retain negative results; distinguish nominal model performance from actual service; confirm no primary-objective regressions caused by secondary weights.
-
-**Guards:** no tuning only to one demo scenario; no claims of guaranteed zero stockouts; no switch to a different runtime speed in only the favored policy.
-
-**Deliverables:** defensible default policy, sensitivity report, and documented limits.
-
-### Phase 11 — Packaging, documentation, and demonstration
-
-**Implement:** clean local startup, configuration examples, backup/export procedure, operational runbook, known limitations, architecture/model docs, and a short repeatable demo script.
-
-**Read/copy:** guide startup pattern and tested commands; actual measured reports, not hypothetical improvements.
-
-**Verify:** clean environment setup, no network-dependent fonts/assets required for core use, persisted run recovery, exported report readability, and rehearsed crisis demo.
-
-**Guards:** no unsupported promises about judging criteria; no optional cloud deployment required to run a local simulator app.
-
-**Deliverables:** full MVP release candidate and submission-ready evidence package subject to official participant brief.
-
-### Phase 12 — Final verification and release gate
-
-**Implement:** fix any remaining release blockers; freeze the reviewed contract/model/configuration versions and benchmark package.
-
-**Read:** all guide hard rules, recorded contract probes, final application behavior, and official participant brief if provided.
-
-**Verify:** complete the definition-of-done checklist in §22; run required contract, optimization, integration, resilience, and critical UI checks; confirm fresh reports match the released application revision.
-
-**Anti-pattern audit:** search for unauthorized simulator database access, ML dependencies, invented API paths, random dashboard metrics, undocumented hard-coded capacity reductions, multiple controller startup sites, and new idempotency keys inside blind retry loops. Review findings rather than relying on keyword search alone.
-
-**Deliverables:** release notes with measured results, unresolved limitations, and exact startup/demo instructions.
+**Anti-pattern audit (before release):** search for unauthorized simulator database access, ML dependencies, invented API paths, random dashboard metrics, undocumented hard-coded capacity reductions, multiple controller startup sites, recorded demand reaching the live policy, and new idempotency keys inside blind retry loops. Review findings rather than relying on keyword search alone.
 
 ## 18. Configuration specification
 
@@ -1309,13 +1333,14 @@ Separate simulator configuration from application policy configuration.
 | Tick size | Read from instance; simulator environment controls actual value. |
 | Simulation speed | Test metadata / simulator setup; do not infer solely from wall-clock assumption. |
 | Start mode | Observe/manual by default until run reconciliation completes. |
-| Horizon hours | Starting experiment 24 hours; compare 12 and 48 hours. |
+| Horizon hours | Starting experiment 24 hours; compare 12, 48 hours, and full remaining supply schedule. |
+| Replan cadence | Every 8 ticks, plus immediately on events, FAILED allocations, supply changes, and reset notices. |
+| Degraded quantity factor | Multiplier on immediate quantities in degraded mode (start 0.7). |
 | Demand profile version | Versioned fixed tables and verified factor semantics. |
 | Demand stress multiplier | Explicit configurable assumption; baseline nominal = 1.0. |
 | Delay allowance | Fixed extra planning ticks after verified physical lead time. |
 | Coverage target | Simulated duration, not an unlabelled liters constant. |
 | Single-route reserve preference | Visible policy option evaluated in benchmarks. |
-| Snapshot skew/age budget | Conservative dispatch gate calibrated against measured speed. |
 | Solve deadline | Measured operational budget, with fallback. |
 | Solver tolerances | Recorded feasibility/optimality settings. |
 | Quantity precision | Declared rounding policy and minimum effective quantity if any. |
@@ -1332,7 +1357,7 @@ Keep this proportional to a single-tenant local hackathon application:
 
 - Bind published ports to loopback by default where practical; the guide does not specify simulator authentication.
 - Do not expose admin reset/fault controls publicly.
-- Keep browser mutations same-origin and apply an appropriate origin/CSRF guard for local state-changing endpoints.
+- Keep browser mutations same-origin; add an origin/CSRF guard for local state-changing endpoints in Milestone 5.
 - Validate all user-entered quantities, IDs, durations, and event parameters on the backend.
 - Route all UI mutations through the coordinator; do not allow a UI shortcut to bypass execution validation.
 - Keep simulator base URL in trusted configuration rather than an unrestricted arbitrary URL-fetch endpoint.
@@ -1373,13 +1398,15 @@ Suggested evidence package:
 | Missing participant brief | MVP might miss official deliverables or objective weights. | Obtain brief; map every explicit requirement before submission. |
 | Incorrect tick ordering | Optimizer uses stock too early or misses departures. | C02/C03 probes and independent trajectory tests. |
 | Demand model mismatch | Model-optimal plan performs poorly in actual runs. | Compare nominal projection with actual demand; expose discrepancy; fixed stress profiles. |
-| Pure LP with voluntary service | False optimum that simulator cannot execute. | Exact consumption constraints or proven equivalence. |
+| LP withholding service | False optimum that simulator cannot execute. | Time-decreasing unmet weights and no terminal reward (§9.4); replay check of `y = min(A, q)` on every plan. |
+| Holding dispatch during faults | Tanks run dry within a real minute. | Conservative degraded dispatch; server validation as safety net (§12.1); F04 comparison. |
+| Plumbing before score | Demo arrives with infrastructure but no measured result. | Working-slice milestone order (§17). |
 | Too much optimization latency | Plan expires before dispatch. | Measure full cycle, bound solve time, simplify horizon, safe fallback. |
-| Inconsistent REST snapshots | Overspending or rejected actions. | Timestamp/skew tracking, resource revalidation, serialized execution. |
+| Inconsistent REST snapshots | Overspending or rejected actions. | Re-read source and destination before each POST; server validation; serialized execution. |
 | Ambiguous POST outcome | Duplicate or obsolete shipment. | Durable immutable intent, ledger reconciliation, same-key replay only when appropriate. |
 | Hidden reset | Old intents replay into a new world. | Run isolation, continuity checks, hold on ambiguity. |
 | Sole-route isolation | Unavoidable local shortage. | Public-notice pre-positioning where possible; report physical limitation honestly. |
-| Finite total supply | Service eventually falls regardless of controller. | Fixed benchmark horizon and supply feasibility analysis. |
+| Finite total supply (likely main regime) | Service falls regardless of controller; overflow or stranding wastes scarce fuel. | C00 first; objective counts lost fuel; hindsight bound shows what was achievable (§5.4, §9.9). |
 | Lost history during outage | Misleading station-level reports. | Frequent persistence, explicit gap detection and completeness flags. |
 | Overfitting scenario recipes | Attractive demo but fragile general performance. | Hold-out recipes, varied event times and severities, report failures. |
 | Incorrect “optimal” marketing | Claims exceed evidence. | Record exact model, objective, tolerance, solve status, and information assumptions. |
@@ -1397,11 +1424,11 @@ Suggested evidence package:
 - [ ] Reset boundaries isolate old histories and unresolved requests.
 - [ ] All documented error envelopes are handled without crashing.
 - [ ] Stream reconnection and silent-loss polling fallback work.
-- [ ] Stale/incomplete/reset-uncertain state cannot silently trigger new dispatch.
+- [ ] Reset-uncertain state cannot trigger new dispatch; degraded state dispatches conservatively and is labeled.
 
 ### Deterministic planning
 
-- [ ] No AI/ML/LLM dependency participates in decisions or explanations.
+- [ ] No AI/ML/LLM dependency participates in decisions or explanations in this phase; deferred items are listed in §25.
 - [ ] Demand equations, hour factors, event effects, and safety parameters are documented.
 - [ ] Source reservation and shipment timing follow contract probes.
 - [ ] Future arrivals are time-indexed and not counted as immediately usable stock.
@@ -1414,7 +1441,8 @@ Suggested evidence package:
 ### Product and evidence
 
 - [ ] Observe, manual, and automatic workflows function end to end.
-- [ ] Dashboard uses the user-selected shadcn/ui + Tailwind CSS foundation with consistent theme tokens and verified keyboard interactions.
+- [ ] Dashboard (Overview, Shipments, Plans) uses the user-selected shadcn/ui + Tailwind CSS foundation with consistent theme tokens.
+- [ ] Reports include the hindsight bound and gap-closed % where C19 allows it.
 - [ ] All displayed values have correct units and freshness indicators.
 - [ ] All six domain events and five fault types are covered by tests.
 - [ ] Stepped benchmarks and default-speed runs are both recorded.
@@ -1442,7 +1470,8 @@ Completion is defined by these gates, not by an arbitrary number of implementati
 | Admin bypasses faults (§2, §7) | §§4, 6, 16 | Planner cannot access admin-only state. |
 | Fixed topology (§8.1–8.4) | §§5, 9, 13 | Valid route matrix and sole-route cases. |
 | Demand profiles/time factors (§8.5–8.6) | §8 | Hour/timezone/tick-size projection tests. |
-| Finite 22-arrival schedule (§8.7) | §§5, 9, 16 | No-supply-tail scenario. |
+| Finite 22-arrival schedule (§8.7) | §§5, 9, 16 | C00 supply sum; S12 scarcity scenario. |
+| Use history for prediction (guide line 29) | This phase: §8.1 residual reporting. Learning: §25 (next phase). | Residual report per station/fuel. |
 | Demand history limits (§4.11) | §§7, 15 | Window overflow and gap-reporting test. |
 | Official metrics (§4.12) | §15 | Raw metric preservation and formula checks. |
 | Missing judging/deliverable brief (scope) | §§2, 20, 22 | Organizer clarification and final mapping. |
@@ -1480,14 +1509,13 @@ These sources support proposed technology/API choices; they are not hackathon ru
 - [shadcn/ui Vite installation](https://ui.shadcn.com/docs/installation/vite): official setup for the user-selected UI stack, including Tailwind CSS, import aliases, initialization, and adding components. Apply this during the frontend implementation phase; no installation is performed as part of this plan update.
 
 - [SciPy `linprog`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.linprog.html): linear objectives, equality/inequality constraints, bounds, HiGHS methods, result status. Documented call shape: `linprog(c, A_ub=None, b_ub=None, A_eq=None, b_eq=None, bounds=(0, None), method='highs', ..., options=None, ..., integrality=None)`. Consult method-specific options; do not assume unsupported HiGHS callbacks or `x0` warm starts.
-- [SciPy `milp`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.milp.html): mixed-integer model interface with objective, integrality, bounds, constraints, and options. Use `Bounds` and `LinearConstraint` as documented. Check status and available solution/gap fields before interpreting output; use supported time and gap controls for the pinned version.
 - [FastAPI lifespan events](https://fastapi.tiangolo.com/advanced/events/): manage HTTP clients, storage connections, and controller startup/shutdown through the application lifespan mechanism. Ensure one owner of the controller.
 - [HTTPX async support](https://www.python-httpx.org/async/): reuse an `AsyncClient` and use its streaming interface for long-lived responses. Avoid creating a new client inside every hot-loop request.
 - [HTTPX timeouts](https://www.python-httpx.org/advanced/timeouts/): configure connect, read, write, and pool timeouts separately, with a distinct policy for the SSE connection.
 
 ### 24.3 Implementation handoff instructions
 
-When implementation is later authorized, execute one phase at a time. At the start of each phase:
+Execute one milestone at a time. At the start of each milestone:
 
 1. Read that phase's listed source sections and previously verified contract fixtures.
 2. Identify its dependencies and unresolved assumptions.
@@ -1496,4 +1524,18 @@ When implementation is later authorized, execute one phase at a time. At the sta
 5. Update the contract/model document if observations differ from the guide.
 6. Advance only when the completion gate passes or a clearly documented limitation has an accepted conservative treatment.
 
-The first concrete implementation milestone is a safe manual shipment lifecycle against the official image. The final milestone is a complete, tested deterministic operations application with measured benchmark evidence. No application construction is authorized by this planning document itself.
+The first concrete implementation milestone is the C00 supply sum, followed by an automatic threshold policy running against the official image with a stepped harness and a measured score. The final milestone is a complete, tested deterministic operations application with measured benchmark evidence.
+
+## 25. Next phase: AI/ML extensions (deferred, not in this phase)
+
+Starts only after this phase's definition of done (§22) is met and a scored deterministic baseline exists. Every AI/ML component must be compared against the deterministic LP on identical scenarios (§16) and must beat it, or stay off.
+
+| Extension | Replaces or augments | Entry condition | Guard |
+|---|---|---|---|
+| Learned demand forecast from `/v1/demand-history` | Formula projection (§8.2) | Residual report (§8.1) shows systematic error the formula misses | Train only on history already observed in the current run; never on recorded future demand. |
+| Data-driven safety margins (e.g. error quantiles) | Hand-set stress multiplier (§8.3) | Hand-tuned sweeps show margins matter | Report margins and sample sizes in every plan. |
+| Learned or RL dispatch policy | LP planner (§9) as primary | LP gap to hindsight bound (§15.3) is large enough to be worth closing | The LP remains as fallback; the executor's safety checks (§10) still apply to every action. |
+| Automatic parameter tuning | Manual sensitivity sweeps (§16) | Stable benchmark harness | Hold-out scenarios; no tuning on judge-like recipes only. |
+| LLM explanations | Constraint templates (§13.4) | Templates exist and are correct | Grounded only in recorded plan data; never makes or changes decisions. |
+
+This phase is the guide's "use the historical and simulated data … to build predictive capabilities and continuously improve your decisions" (line 29). Confirm with organizers whether it is expected for judging.

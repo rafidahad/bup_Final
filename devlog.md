@@ -195,6 +195,10 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 
 ## Log
 
+### 2026-09-29 — Tank and route visuals restored (owner: "previous visual container UI was better")
+- Home brings back the vertical tank gauges (4 stations in one row on wide screens) and the route map, keeping the plain-language labels: "Empty now" / "8.7 h left" / "12+ h left", "+6,781 L in 30 min", road drive times in minutes ("30 min", "1 h"), "closed", "demand 2.0× normal", short station names.
+- Legend in words: striped = fuel on the way, dashed line = fuel needed for the next 12 hours.
+
 ### 2026-09-29 — Operator UI simplified for end users (owner feedback: "too complex")
 - 5 views → 4: **Home** (one-line status, problems in plain sentences, stations with OK/Low/Critical and "runs out in 3.2 hours", "+2,000 L arriving in 30 min", depots, roads as a list), **Actions** (cards phrased as instructions "Send 3,488 L octane to Mirpur", Why, If sent, Send / Skip, Send all; technical detail under "More details"), **History** (decisions and shipments as sentences), **System** (health in plain words, readable event timeline, Settings with friendly planner names, demo tools collapsed under "Test tools").
 - Top bar: simulation time with Start/Pause, and "Sending fuel: View only / I approve / Automatic". Planner moved to Settings; `lp-tick` and `none` hidden.

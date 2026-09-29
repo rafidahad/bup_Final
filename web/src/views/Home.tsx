@@ -1,7 +1,8 @@
 import { AlertTriangle, CheckCircle2, ArrowRight } from "lucide-react"
+import { NetworkMap } from "@/components/NetworkMap"
 import { Button } from "@/components/ui/button"
-import { type Alert, type Card, type FuelLevel, type Overview, type Station, usePoll } from "@/lib/api"
-import { type Level, LEVEL_TEXT, clock, depotName, describeAlerts, describeEvent, fuel, inTicks, inTime, level, liters, roadName, stationName } from "@/lib/text"
+import { type Alert, type Card, type FuelLevel, type Overview, type SimAllocation, type Station, usePoll } from "@/lib/api"
+import { type Level, LEVEL_TEXT, clock, depotName, describeAlerts, describeEvent, fuel, inTicks, level, liters, stationName } from "@/lib/text"
 import { cn } from "@/lib/utils"
 import { FuelDot, Loading, Panel } from "./parts"
 
@@ -18,6 +19,7 @@ export function Home({ go }: { go: (v: "actions") => void }) {
   const { data, error } = usePoll<Overview>("/api/overview", 1000)
   const { data: recs } = usePoll<{ cards: Card[] }>("/api/recommendations", 2000)
   const { data: alerts } = usePoll<{ alerts: Alert[] }>("/api/alerts", 2000)
+  const { data: allocs } = usePoll<SimAllocation[]>("/api/allocations", 2000)
   if (!data) return <Loading error={error} />
 
   const tm = data.tick_minutes
@@ -67,13 +69,24 @@ export function Home({ go }: { go: (v: "actions") => void }) {
       </div>
 
       <section aria-labelledby="stations">
-        <h2 id="stations" className="mb-3 text-xl font-semibold">Stations</h2>
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="stations" className="text-xl font-semibold">Station tanks</h2>
+          <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
+            <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-5 rounded-sm" style={{ background: "repeating-linear-gradient(135deg, var(--ink) 0 2px, transparent 2px 5px)", opacity: 0.5 }} />fuel on the way</span>
+            <span className="flex items-center gap-1.5"><span className="inline-block w-5 border-t-2 border-dashed border-ink/70" />fuel needed for the next 12 hours</span>
+          </p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {data.stations.map(s => <StationCard key={s.id} station={s} now={data.tick} tickMinutes={tm} />)}
         </div>
       </section>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 xl:grid-cols-[3fr_2fr]">
+        <Panel title="Roads between depots and stations">
+          <div className="p-3">
+            <NetworkMap depots={data.depots} stations={data.stations} routes={data.routes} allocations={allocs ?? []} tickMinutes={tm} />
+          </div>
+        </Panel>
         <Panel title="Depots (where fuel comes from)">
           <ul className="divide-y">{data.depots.map(d => (
             <li key={d.id} className="px-5 py-3">
@@ -84,16 +97,6 @@ export function Home({ go }: { go: (v: "actions") => void }) {
               <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-base">
                 {d.fuels.map(f => <span key={f.fuel}><FuelDot fuel={f.fuel} /> {fuel(f.fuel)} {liters(f.inventory)}</span>)}
               </div>
-            </li>))}
-          </ul>
-        </Panel>
-        <Panel title="Roads">
-          <ul className="divide-y">{data.routes.map(r => (
-            <li key={r.id} className="flex items-center justify-between px-5 py-2.5 text-base">
-              <span>{roadName(r.id)}</span>
-              {r.status === "AVAILABLE"
-                ? <span className="text-muted-foreground">Open, {(r.transit_ticks * tm) / 60 < 1 ? `${r.transit_ticks * tm} min` : `${(r.transit_ticks * tm) / 60} h`} drive</span>
-                : <span className="font-semibold text-alarm">Closed</span>}
             </li>))}
           </ul>
         </Panel>
@@ -114,37 +117,43 @@ function StationCard({ station: s, now, tickMinutes }: { station: Station; now: 
       </div>
       {!open && <p className="mb-2 text-base font-medium text-alarm">This station is closed; customers cannot buy fuel here.</p>}
       {open && s.demand_multiplier !== 1 && <p className="mb-2 text-base text-warn">Demand is {s.demand_multiplier.toFixed(1)}× normal here.</p>}
-      <ul className="space-y-3">
-        {s.fuels.map((f, i) => <FuelRow key={f.fuel} f={f} lvl={levels[i]} now={now} tickMinutes={tickMinutes} />)}
-      </ul>
+      <div className="flex justify-around gap-2">
+        {s.fuels.map((f, i) => <Tank key={f.fuel} f={f} lvl={levels[i]} now={now} tickMinutes={tickMinutes} />)}
+      </div>
     </Panel>
   )
 }
 
-function FuelRow({ f, lvl, now, tickMinutes }: { f: FuelLevel; lvl: Level; now: number; tickMinutes: number }) {
+/** One tank: stock (solid), fuel on the way (striped), and the fuel needed for the next 12 hours (dashed line). */
+function Tank({ f, lvl, now, tickMinutes }: { f: FuelLevel; lvl: Level; now: number; tickMinutes: number }) {
   const pct = (v: number) => Math.max(0, Math.min(100, (v / f.capacity) * 100))
   const fill = pct(f.inventory)
   const coming = Math.min(pct(f.incoming ?? 0), 100 - fill)
-  const color = lvl === "critical" || lvl === "closed" ? "text-alarm" : lvl === "low" ? "text-warn" : "text-muted-foreground"
+  const need12 = pct((f.demand_per_day ?? 0) / 2)
+  const color = `var(--${f.fuel.toLowerCase()})`
+  const tone = lvl === "critical" || lvl === "closed" ? "text-alarm" : lvl === "low" ? "text-warn" : "text-ok"
+  const left = lvl === "closed" ? "Not selling"
+    : f.stockout_hours == null ? "12+ h left"
+      : f.stockout_hours <= 0.05 ? "Empty now"
+        : f.stockout_hours < 1 ? `${Math.max(1, Math.round(f.stockout_hours * 60))} min left` : `${f.stockout_hours.toFixed(1)} h left`
   return (
-    <li>
-      <div className="flex items-baseline justify-between gap-2 text-base">
-        <span className="font-medium"><FuelDot fuel={f.fuel} /> {fuel(f.fuel)}</span>
-        <span className={cn("font-medium", color)}>
-          {lvl === "closed" ? "Not selling" : f.stockout_hours == null ? "Enough for 12+ hours" : `Runs out ${inTime(f.stockout_hours)}`}
-        </span>
+    <figure className="flex w-[4.75rem] flex-col items-center gap-2" aria-label={`${fuel(f.fuel)}: ${liters(f.inventory)} of ${liters(f.capacity)}, ${left}`}>
+      <div className="relative h-40 w-12 overflow-hidden rounded-md border-2 border-ink/25 bg-white">
+        <div className="absolute inset-x-0 bottom-0 transition-[height] duration-700" style={{ height: `${fill}%`, background: color }} />
+        {coming > 0 && <div className="absolute inset-x-0" style={{
+          bottom: `${fill}%`, height: `${coming}%`, opacity: 0.55,
+          background: `repeating-linear-gradient(135deg, ${color} 0 3px, transparent 3px 7px)`,
+        }} />}
+        {need12 > 0 && need12 < 100 && <div className="absolute inset-x-0 border-t-2 border-dashed border-ink/70" style={{ bottom: `${need12}%` }} />}
       </div>
-      <div className="mt-1 flex h-3 overflow-hidden rounded-full bg-muted" role="img"
-        aria-label={`${fuel(f.fuel)}: ${liters(f.inventory)} of ${liters(f.capacity)}`}>
-        <div className="h-full" style={{ width: `${fill}%`, background: `var(--${f.fuel.toLowerCase()})` }} />
-        {coming > 0 && <div className="h-full opacity-35" style={{ width: `${coming}%`, background: `var(--${f.fuel.toLowerCase()})` }} />}
-      </div>
-      <div className="mt-1 flex flex-wrap justify-between gap-x-3 text-sm text-muted-foreground">
-        <span>{liters(f.inventory)} of {liters(f.capacity)}</span>
+      <figcaption className="text-center leading-snug">
+        <div className="flex items-center justify-center gap-1.5 text-base font-medium"><FuelDot fuel={f.fuel} />{fuel(f.fuel)}</div>
+        <div className="text-base font-semibold">{liters(f.inventory)}</div>
+        <div className={cn("text-sm font-semibold", tone)}>{left}</div>
         {(f.incoming ?? 0) > 0 && f.next_arrival_tick != null &&
-          <span className="font-medium text-foreground">+{liters(f.incoming ?? 0)} arriving {inTicks(f.next_arrival_tick, now, tickMinutes)}</span>}
-      </div>
-    </li>
+          <div className="text-sm text-muted-foreground">+{liters(f.incoming ?? 0)} {inTicks(f.next_arrival_tick, now, tickMinutes)}</div>}
+      </figcaption>
+    </figure>
   )
 }
 

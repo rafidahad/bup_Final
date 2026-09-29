@@ -66,3 +66,10 @@ def test_dispatch_budget_limits_each_tick():
     for (_, _, k), q in r["x"].items():
         per_tick[k] = per_tick.get(k, 0) + q
     assert max(per_tick.values()) <= 1000 + 1e-6
+
+
+def test_buffer_never_withholds_service():
+    # with a safety buffer the LP still serves min(A, q) now instead of keeping stock for the buffer
+    r = solve(world(station_inv=100.0, route=False), horizon=6, headroom_margin=0, buffer_ticks=16)
+    assert r["served_by_k"][0] == pytest.approx(PER_TICK, abs=1e-6)
+    assert r["served_by_k"][1] == pytest.approx(100 - PER_TICK, abs=1e-6)

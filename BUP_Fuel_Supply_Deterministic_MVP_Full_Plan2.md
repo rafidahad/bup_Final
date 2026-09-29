@@ -70,6 +70,10 @@ Consequence: Revision 3's optimizer and benchmark evidence remain the core of "I
 
 ### R4.3 Decisions that need the owner (asked before execution)
 
+> **Answered 29 Sep 2026:** D1 = statistics now, ML later. D2 = **less than 24 hours** remain. D3 = README for setup + devlog. D4 = LP + hand-set buffer, threshold as fallback.
+>
+> **24-hour cut (execution order):** M3 decision support → M5 web app → M7 compose + CI → M6 metrics + health (Grafana only if time remains) → M4 remaining resilience mappings → M8 k6 load test → M9 README, diagram, demo script. Cut first if late: Grafana, lab polish, second load-test path, alternatives list on cards.
+
 - **D1 — Predict/Detect scope.** The statement does not require ML, but "stockout risk 72% → 19%" (PS §9), "model confidence" (PS §14), and "confidence too low → human review" (PS §11) need a probability. **Proposal:** compute stockout risk and confidence now with statistics (the observed demand-noise distribution from `/v1/demand-history`, applied to the deterministic projection), and rule-based detectors. Learned forecasting and LLM explanations stay in the next phase (§25), added later as optional layers with fallbacks. This relaxes one earlier rule: history would feed displayed risk and confidence, not only residual reports. Optimizer decisions stay deterministic.
 - **D2 — Time remaining** until submission and judging, which decides how much of M8–M9 and the next phase fits.
 - **D3 — Documentation.** Deliverable PS §19.2 needs setup and deployment instructions. **Proposal:** `README.md` holds only setup/deploy instructions and the architecture diagram; `devlog.md` stays the single working log.

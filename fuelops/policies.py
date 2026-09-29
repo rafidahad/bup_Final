@@ -44,8 +44,10 @@ class LPPolicy:
     in-transit stock. Cuts requests ~50x; batch=False executes the plan tick by tick.
     """
 
-    def __init__(self, horizon=96, replan=8, stress=1.0, batch=True):
+    def __init__(self, horizon=96, replan=8, stress=1.0, batch=True, buffer_ticks=0, window=None):
         self.horizon, self.replan, self.stress, self.batch = horizon, replan, stress, batch
+        self.buffer_ticks = buffer_ticks
+        self.window = window or replan  # ticks of planned flow sent per batch
         self.reserve_incoming = batch  # unbatched: LP models arrival clipping itself
         self.plan, self.solved_at, self.log = None, None, []
         self.exec_delay = 0  # ticks between snapshot and submission; the live controller measures it
@@ -54,7 +56,11 @@ class LPPolicy:
         from .lp import solve  # scipy import only when used
         v = snap["tick"]
         if self.plan is None or v - self.solved_at >= self.replan:
-            res = solve(snap, self.horizon, stress=self.stress, earliest=self.exec_delay)
+            try:
+                res = solve(snap, self.horizon, stress=self.stress, earliest=self.exec_delay,
+                            buffer_ticks=self.buffer_ticks)
+            except Exception as e:  # noqa: BLE001 — any solver failure → rule-based fallback (PS §11)
+                res = {"status": -1, "seconds": 0.0, "unmet": None, "message": repr(e)}
             self.log.append({"tick": v, "status": res["status"], "seconds": round(res["seconds"], 3),
                              "unmet_forecast": res["unmet"]})
             if res["status"] != 0:
@@ -64,7 +70,7 @@ class LPPolicy:
             if self.batch:
                 total = {}
                 for (r, f, k), q in self.plan.items():
-                    if k < self.exec_delay + self.replan:
+                    if k < self.exec_delay + self.window:
                         total[r, f] = total.get((r, f), 0.0) + q
                 return [(r, f, q) for (r, f), q in sorted(total.items())]
         if self.batch:
@@ -75,3 +81,5 @@ class LPPolicy:
 
 POLICIES["lp"] = LPPolicy
 POLICIES["lp-tick"] = lambda: LPPolicy(batch=False)
+# D4: hand-set 4 h safety buffer; sends 12 h of planned flow per batch (operator-sized recommendations)
+POLICIES["lp-buffer"] = lambda: LPPolicy(buffer_ticks=16, window=48)

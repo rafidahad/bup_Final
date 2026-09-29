@@ -60,8 +60,8 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 | 0 | Supply adequacy (C00) + contract probes | Done |
 | 1 | Working slice: threshold policy, executor, stepped harness | Done |
 | 2 | LP planner + hindsight bound | Done (stepped); live needs safety buffer (D4) |
-| M3 | Decision-support core: detectors, stockout risk, recommendation cards, what-if, approval queue, audit | Waiting for owner go-ahead |
-| M4 | Resilience behaviours (PS §11 mappings) | Partly done (retries, disruption guard, reset detection, degraded flag) |
+| M3 | Decision-support core: detectors, stockout risk, recommendation cards, what-if, approval queue, audit | Done |
+| M4 | Resilience behaviours (PS §11 mappings) | Mostly done: validation+alert, circuit breaker, cached state, kill switch → fallback, confidence gate; demos pending |
 | M5 | Operator web app (5 views + lab) | Not started (API skeleton exists) |
 | M6 | Observability: Prometheus, Grafana, logs, health | Not started |
 | M7 | DevOps: Dockerfile, full compose, CI | Not started (simulator compose only) |
@@ -95,6 +95,8 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 
 ## Decisions
 
+- 2026-09-29 — Owner answered D1–D4 (plan R4.3); < 24 h to judging → 24-hour cut order.
+
 - 2026-09-29 — Simulator host port **18000** (`SIM_PORT`), bound to 127.0.0.1. Reason: Windows/Hyper-V reserves TCP 7983–8082 on this PC, so 8000 cannot bind. Image unchanged.
 - 2026-09-29 — Plan revised to Revision 3 per design review (LP not MILP, degraded dispatch instead of hold, working-slice milestones, hindsight bound).
 - 2026-09-29 — **Owner correction:** do every part that needs no AI/ML now; AI/ML parts go to the next phase. Reverted the review's residual-percentile safety buffers (history-driven) to hand-set stress multiplier; history = validation and residual reporting only. Plan §1.2 table and §25 added.
@@ -104,7 +106,7 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 ## Open questions / blockers
 
 - Participant brief received (PS). **Judging is not a simulator score** (PS §23 weights: product 20, intelligence 20, architecture 15, DevOps 15, resilience 10, observability 10, demo 10).
-- Owner decisions D1–D4 pending (plan R4.3): Predict/Detect scope, time remaining, README for setup, live policy.
+- Owner decisions (2026-09-29): **D1** stockout risk/confidence from observed demand noise + rule-based detection now, ML later; **D2** < 24 h remain; **D3** README (setup) + devlog; **D4** LP + hand-set buffer, threshold fallback.
 - C11 (demand timing/factor composition) left for the AI/ML phase with the residual report (projection is a frozen component).
 
 ## Results (stepped, baseline scenario, seed 12345, no events, default 15-min tick)
@@ -142,9 +144,19 @@ LP solve time: 84 solves, p50 0.17 s, max 0.39 s, all optimal. **Issue:** LP sen
 
 ## Next up
 
-- Get owner answers to D1–D4 (plan R4.3), then execute R4.6 in order: M3 → M5 → M7 → M6 → M4 → M8 → M9.
+- Execute the 24-hour cut (plan R4.3): M3 → M5 → M7 → M6 → M4 → M8 → M9.
 
 ## Log
+
+### 2026-09-29 — M3 decision support (+ most of M4)
+- `intel.py`: NoiseModel (relative demand noise per profile from observed history, residual computed once per row, 3-day window), `project()` (time to stockout, 12 h stockout risk via normal approximation, what-if arrivals), `confidence()` (0.5 from guide prior → 1.0 with 3 days of history; ×0.5 degraded, ×0.8 active crisis), 4 rule-based detectors (anomalous demand z>4, abnormal inventory vs ≥8-tick reference, dispatch bottleneck ≥90%, public disruptions).
+- `decisions.py`: recommendation cards (PS §9): why, signals, allocations with limits/binding constraint, before/after risk and stockout hours, alternatives, confidence, review flag (<0.5 → human review, PS §11).
+- `store.py`: SQLite decision + incident audit. `metrics.py`: Prometheus metrics (app, integration, intelligence).
+- `controller.py` rewritten: validation (invalid response → reject + incident), circuit breaker (5 failures → 2 s open), cached state, intelligence kill switch → threshold fallback, auto mode executes only confident cards, approvals revalidate on a fresh snapshot, metrics cached for API.
+- `lp.py`: hand-set safety buffer (D4), soft penalty c_buf = ε/2 — **first attempt (0.5/H) failed a new unit test: the LP withheld service**; fixed after correcting the argument (withheld liters still serve later demand, so the buffer weight must be below ε). 5/5 tests pass.
+- `api.py`: recommendations/approve/reject, decisions, alerts, health (PS §15 components + p95 + error rate), `/metrics`, lab event/fault/control (operator token), path-traversal-safe SPA serving.
+- Measured: **lp-buffer live, no fault, 400 ticks: service 1.0000, 0 L unmet** (unbuffered LP was 0.977). Smoke test: Karnaphuli spike detected at z≈12–15; card "Diesel runs out in ~7.8 h … risk 100% → 0% with 3,621 L" approved and executed.
+- Found and fixed: startup confidence 0 blocked auto mode (Karnaphuli diesel fell to 236 L); abnormal-inventory false positives from live read skew (16 in one run); slow cycles from recomputing residuals.
 
 ### 2026-09-29 — Official problem statement received; plan Revision 4
 - Read `Problem_Statement_BUP_CSE_Fest_2026.pdf` (11 pages) in full and added it to the repo.

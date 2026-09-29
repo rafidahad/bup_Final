@@ -44,17 +44,22 @@ class _Rows:
 
 
 def solve(snap, horizon=96, demand=None, stress=1.0, weights="decreasing",
-          c_over=1e-3, c_tx=1e-5, headroom_margin=100.0, earliest=0):
+          c_over=1e-3, c_tx=1e-5, headroom_margin=100.0, earliest=0, buffer_ticks=0):
     """Returns dict(status, x={(route, fuel, k): liters}, served, unmet, demand, seconds).
 
     demand: optional {(station, fuel, tick): liters} overriding the formula (hindsight bound only).
     earliest: first offset at which a new shipment can really be submitted (measured execution lag;
     0 in stepped mode). Shipments before it are impossible, so they are fixed to zero (plan §9.5).
+    buffer_ticks: hand-set safety stock (owner decision D4) = that many ticks of demand, as a soft target.
+    Withholding a liter for m ticks earns m * c_buf of buffer credit but costs m * eps of unmet weight
+    (the liter still serves later demand at a lower weight). c_buf = eps / 2 < eps keeps the greedy-service
+    property (§9.4); c_buf still exceeds any transit cost, so buffers do get filled.
     """
     t0 = time.perf_counter()
     v, H = snap["tick"], horizon
     tm = snap.get("tick_minutes", 15)
     eps = 1.0 / (10 * H)
+    c_buf = eps / 2
     region = {r["id"]: r["demand_factor"] for r in snap["regions"]}
     routes = [r for r in snap["routes"].values()]
     V, eq, ub = _Vars(), _Rows(), _Rows()
@@ -113,6 +118,9 @@ def solve(snap, horizon=96, demand=None, stress=1.0, weights="decreasing",
                 w = 1.0 if weights == "flat" else 1.0 + eps * (H - k)
                 y, u, over = V.add(hi=q), V.add(cost=w), V.add(cost=c_over)
                 I.append(V.add(hi=cap))
+                if buffer_ticks:
+                    b = V.add(cost=c_buf)  # shortfall below the buffer after serving tick k
+                    ub.add([(I[k + 1], -1.0), (b, -1.0)], -min(q * buffer_ticks, cap))
                 arr = [(x[r["id"], f, k - r["transit_ticks"]], 1.0) for r in into if k - r["transit_ticks"] >= 0]
                 pre = existing.get(k, 0.0)
                 # after arrival (clipped): I[k] + arr + pre - over <= cap - margin

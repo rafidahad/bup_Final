@@ -140,6 +140,163 @@ def c15():
     print("after clear, stale header", sim.last_stale)
 
 
+def event(type_, start, duration, **params):
+    return sim.inject_event({"type": type_, "start_tick": start, "duration_ticks": duration, "parameters": params})
+
+
+def c07():
+    """What does depot CONSTRAINED change numerically?"""
+    fresh()
+    event("depot_constraint", 0, 3, depot_ids=["depot-gazipur"])
+    # fill the 12,000 budget with small requests to stations that have room, then try 1 L more
+    legs = [("station-tongi", "route-gazipur-tongi", "DIESEL"), ("station-mirpur", "route-gazipur-mirpur", "DIESEL")]
+    for t in range(4):
+        d = depot("depot-gazipur")
+        res = [try_alloc(f"c07-{t}-{i}", "depot-gazipur", s, r, f, 1500) for i, (s, r, f) in enumerate(legs * 4)]
+        extra = try_alloc(f"c07-{t}-x", "depot-gazipur", "station-tongi", "route-gazipur-tongi", "OCTANE", 1)
+        print("tick", t, d["status"], "cap field", d["dispatch_capacity_per_tick"],
+              "| 8x1500 accepted:", sum(r.startswith("OK") for r in res), "| +1 L:", extra)
+        sim.step()
+
+
+def c08():
+    """Route disruption vs pending and in-transit shipments; C18 refund on failure."""
+    fresh()
+    a = sim.allocate("c08-transit", "depot-gazipur", "station-mirpur", "route-gazipur-mirpur", "DIESEL", 1000)
+    sim.step()  # a departs at tick 0
+    b = sim.allocate("c08-pending", "depot-gazipur", "station-mirpur", "route-gazipur-mirpur", "PETROL", 1000)
+    stock = depot("depot-gazipur")["inventory"]["PETROL"]
+    ev = event("route_disruption", 1, 3, route_ids=["route-gazipur-mirpur"])
+    print("event", ev["status"], "route now", sim.routes()[0]["status"])
+    for _ in range(4):
+        sim.step()
+        t = sim.instance()["tick"]
+        r = next(x for x in sim.routes() if x["id"] == "route-gazipur-mirpur")
+        print("tick", t, "route", r["status"], "| in-transit", show(alloc_row(a["id"]))["status"],
+              "| pending", {k: alloc_row(b["id"])[k] for k in ("status", "failure_reason")},
+              "| gazipur petrol", depot("depot-gazipur")["inventory"]["PETROL"], "(after POST:", stock, ")")
+    print("metrics", sim.metrics())
+    print("POST during disruption:", try_alloc("c08-x", "depot-gazipur", "station-mirpur", "route-gazipur-mirpur", "DIESEL", 10))
+
+
+def c09():
+    """Station outage: inventory, demand, served/unmet, arrivals during outage."""
+    fresh()
+    sim.allocate("c09", "depot-gazipur", "station-tongi", "route-gazipur-tongi", "DIESEL", 2000)  # arrives tick 2
+    event("station_outage", 1, 3, station_ids=["station-tongi"])
+    for _ in range(6):
+        t = sim.instance()["tick"]
+        st = station("station-tongi")
+        print("tick", t, st["status"], "diesel", round(st["inventory"]["DIESEL"], 1),
+              "| POST:", try_alloc(f"c09-{t}", "depot-gazipur", "station-tongi", "route-gazipur-tongi", "OCTANE", 10))
+        sim.step()
+    rows = sorted((h["tick"], round(h["demand_liters"], 1), round(h["served_liters"], 1), round(h["unmet_liters"], 1))
+                  for h in sim.demand_history("station-tongi", 100) if h["fuel_type"] == "DIESEL")
+    print("tongi diesel (tick, demand, served, unmet):", rows)
+    print("allocations", [a["status"] for a in sim.allocations() if a["fuel_type"] == "DIESEL"])
+
+
+def c12():
+    """Overlapping demand spikes: composition and resolution."""
+    fresh()
+    event("demand_spike", 1, 4, station_ids=["station-mirpur"], multiplier=1.5)
+    event("demand_spike", 2, 4, region_ids=["region-dhaka"], multiplier=2.0)
+    for _ in range(8):
+        t = sim.instance()["tick"]
+        print("tick", t, "mirpur mult", station("station-mirpur")["demand_multiplier"],
+              "tongi mult", station("station-tongi")["demand_multiplier"],
+              [(e["id"], e["status"]) for e in sim.events()])
+        sim.step()
+
+
+def c13():
+    """Which supply rows do shipment_delay / supply_shortfall mutate, and when?"""
+    fresh()
+    before = {s["id"]: (s["planned_tick"], s["quantity"]) for s in sim.supply()}
+    event("shipment_delay", 2, 5, depot_ids=["depot-gazipur"], delay_ticks=3)
+    event("supply_shortfall", 2, 5, depot_ids=["depot-patiya"], fuel_types=["DIESEL"], factor=0.5)
+    for _ in range(4):
+        sim.step()
+        t = sim.instance()["tick"]
+        now = {s["id"]: (s["planned_tick"], s["quantity"], s["status"]) for s in sim.supply()}
+        changed = {k: (before[k], v) for k, v in now.items() if v[:2] != before[k]}
+        print("tick", t, "changed rows:", len(changed), dict(list(changed.items())[:4]))
+    for _ in range(12):
+        sim.step()
+    print("after resolve+arrivals:", [(s["id"], s["planned_tick"], s["actual_tick"], s["quantity"], s["status"])
+                                      for s in sim.supply()[:4]])
+
+
+def _stream_events(seconds, out, name):
+    import httpx
+    try:
+        with httpx.Client(base_url=sim.http.base_url, timeout=seconds + 5) as c, \
+                c.stream("GET", "/v1/stream") as r:
+            out.append((name, "status", r.status_code))
+            t0 = time.perf_counter()
+            for line in r.iter_lines():
+                if line:
+                    out.append((name, round(time.perf_counter() - t0, 2), line[:80]))
+                if time.perf_counter() - t0 > seconds:
+                    break
+    except Exception as e:  # noqa: BLE001 — probe records whatever happens
+        out.append((name, "error", repr(e)[:120]))
+
+
+def c14():
+    """stream_disconnect: does it cut existing streams or only block new ones?"""
+    import threading
+    fresh()
+    out = []
+    old = threading.Thread(target=_stream_events, args=(6, out, "existing"))
+    old.start()
+    while not out:  # wait until the existing stream is really open
+        time.sleep(0.05)
+    sim.inject_fault({"type": "stream_disconnect", "duration_seconds": 3})
+    time.sleep(0.2)
+    _stream_events(0.5, out, "new")
+    sim.step(); sim.step()
+    old.join()
+    sim.clear_faults()
+    for o in out:
+        print(o)
+
+
+def c16():
+    """How can an external reset be recognized?"""
+    import threading
+    fresh()
+    sim.allocate("c16", "depot-gazipur", "station-mirpur", "route-gazipur-mirpur", "DIESEL", 1000)
+    for _ in range(5):
+        sim.step()
+    before = sim.instance()
+    out = []
+    th = threading.Thread(target=_stream_events, args=(2, out, "sse"))
+    th.start()
+    time.sleep(0.5)
+    sim.reset()
+    th.join()
+    after = sim.instance()
+    print("before", before)
+    print("after ", after)
+    print("allocations after reset", sim.allocations())
+    for o in out:
+        print(o)
+
+
+def c17():
+    """Fractional quantities; demand-history ordering and limit."""
+    fresh()
+    print("fractional 1234.567:", try_alloc("c17", "depot-gazipur", "station-mirpur", "route-gazipur-mirpur", "DIESEL", 1234.567))
+    print("depot after", depot("depot-gazipur")["inventory"]["DIESEL"])
+    for _ in range(3):
+        sim.step()
+    h = sim.demand_history("station-mirpur", 5)
+    print("limit 5 →", [(x["id"], x["tick"], x["fuel_type"]) for x in h])
+    g = sim.demand_history(None, 3)
+    print("global limit 3 →", [(x["id"], x["tick"], x["station_id"]) for x in g])
+
+
 if __name__ == "__main__":
     names = sys.argv[1:] or [n for n in dir() if n[0] == "c" and n[1:].isdigit()]
     for n in names:

@@ -48,12 +48,13 @@ class LPPolicy:
         self.horizon, self.replan, self.stress, self.batch = horizon, replan, stress, batch
         self.reserve_incoming = batch  # unbatched: LP models arrival clipping itself
         self.plan, self.solved_at, self.log = None, None, []
+        self.exec_delay = 0  # ticks between snapshot and submission; the live controller measures it
 
     def __call__(self, snap):
         from .lp import solve  # scipy import only when used
         v = snap["tick"]
         if self.plan is None or v - self.solved_at >= self.replan:
-            res = solve(snap, self.horizon, stress=self.stress)
+            res = solve(snap, self.horizon, stress=self.stress, earliest=self.exec_delay)
             self.log.append({"tick": v, "status": res["status"], "seconds": round(res["seconds"], 3),
                              "unmet_forecast": res["unmet"]})
             if res["status"] != 0:
@@ -63,7 +64,7 @@ class LPPolicy:
             if self.batch:
                 total = {}
                 for (r, f, k), q in self.plan.items():
-                    if k < self.replan:
+                    if k < self.exec_delay + self.replan:
                         total[r, f] = total.get((r, f), 0.0) + q
                 return [(r, f, q) for (r, f), q in sorted(total.items())]
         if self.batch:

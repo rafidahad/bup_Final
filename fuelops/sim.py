@@ -1,5 +1,6 @@
 """Thin HTTP client for the official simulator. REST only; no state kept here."""
 import os
+import time
 
 import httpx
 
@@ -33,11 +34,21 @@ class Sim:
         self.http = httpx.Client(base_url=base_url, timeout=timeout)
         self.last_stale = False  # X-Simulator-Stale seen on the most recent GET
 
-    def get(self, path, **params):
-        r = self.http.get(path, params=params or None)
-        self.last_stale = r.headers.get("X-Simulator-Stale") == "true"
-        _raise_for(r)
-        return r.json()
+    def get(self, path, retries=3, **params):
+        """Reads are safe to retry: 503 (injected fault) and transport errors back off briefly."""
+        for attempt in range(retries + 1):
+            try:
+                r = self.http.get(path, params=params or None)
+                if r.status_code == 503 and attempt < retries:
+                    time.sleep(0.02 * 2 ** attempt)
+                    continue
+                self.last_stale = r.headers.get("X-Simulator-Stale") == "true"
+                _raise_for(r)
+                return r.json()
+            except httpx.TransportError:
+                if attempt == retries:
+                    raise
+                time.sleep(0.02 * 2 ** attempt)
 
     def post(self, path, json=None):
         r = self.http.post(path, json=json)

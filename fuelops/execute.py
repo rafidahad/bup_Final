@@ -5,10 +5,13 @@ Rules baked in from probes (devlog "Simulator semantics"):
   so we reserve headroom for our own incoming shipments.
 - C04: dispatch budget = allocations created this tick, per depot.
 - C10: same key + same body replays safely (201, same allocation).
+- C08/C18: a shipment whose route is disrupted in its creation tick FAILS and its fuel is
+  NOT refunded, so never POST on a route with a disruption starting now or next tick.
 """
 import json
 import math
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
@@ -17,17 +20,25 @@ from .sim import SimError
 OPEN_ALLOC = ("PENDING", "IN_TRANSIT")
 
 
+_pool = ThreadPoolExecutor(max_workers=9)
+
+
 def snapshot(sim):
-    inst = sim.instance()
+    """All reads in parallel: under a latency fault this costs one delay, not nine (plan §12.1)."""
+    names = ("instance", "supply", "regions", "depots", "stations", "routes", "allocations", "events")
+    got = dict(zip(names, _pool.map(lambda n: getattr(sim, n)(), names)))
+    inst = got["instance"]
     s = {
         "tick": inst["tick"],
         "tick_minutes": inst["tick_minutes"],
-        "supply": sim.supply(),
-        "regions": sim.regions(),
-        "depots": {d["id"]: d for d in sim.depots()},
-        "stations": {x["id"]: x for x in sim.stations()},
-        "routes": {r["id"]: r for r in sim.routes()},
-        "allocs": sim.allocations(),
+        "status": inst["status"],
+        "supply": got["supply"],
+        "regions": got["regions"],
+        "depots": {d["id"]: d for d in got["depots"]},
+        "stations": {x["id"]: x for x in got["stations"]},
+        "routes": {r["id"]: r for r in got["routes"]},
+        "allocs": got["allocations"],
+        "events": got["events"],
     }
     s["incoming"] = {}  # (station, fuel) -> [(arrival_tick, qty)]
     for a in s["allocs"]:
@@ -37,6 +48,16 @@ def snapshot(sim):
                 eta = s["tick"] + s["routes"][a["route_id"]]["transit_ticks"]
             s["incoming"].setdefault((a["destination_station_id"], a["fuel_type"]), []).append((eta, a["quantity"]))
     return s
+
+
+def blocked_routes(snap, lookahead=1):
+    """Routes with a disruption active now or starting within `lookahead` ticks (C08: POSTing loses the fuel)."""
+    out = set()
+    for e in snap["events"]:
+        if e["type"] == "route_disruption" and e["status"] != "RESOLVED" and e["start_tick"] <= snap["tick"] + lookahead:
+            ids = e["parameters"].get("route_ids") or list(snap["routes"])  # empty filter = all routes
+            out.update(ids)
+    return out
 
 
 def incoming_total(snap, station, fuel):
@@ -66,10 +87,12 @@ class Executor:
             for f, cap in st["capacity"].items():
                 room[(sid, f)] = cap - st["inventory"][f] - (incoming_total(snap, sid, f) if self.reserve_incoming else 0)
 
+        blocked = blocked_routes(snap)
         for route_id, fuel, liters in wants:
             r = snap["routes"][route_id]
             d, s = r["source_depot_id"], r["destination_station_id"]
-            if r["status"] != "AVAILABLE" or snap["stations"][s]["status"] != "OPEN":
+            if r["status"] != "AVAILABLE" or route_id in blocked or snap["stations"][s]["status"] != "OPEN":
+                self.stats["skipped_blocked"] = self.stats.get("skipped_blocked", 0) + (route_id in blocked)
                 continue
             qty = min(liters, depot_stock[(d, fuel)], budget[d])
             if self.reserve_incoming:

@@ -44,10 +44,12 @@ class _Rows:
 
 
 def solve(snap, horizon=96, demand=None, stress=1.0, weights="decreasing",
-          c_over=1e-3, c_tx=1e-5, headroom_margin=100.0):
+          c_over=1e-3, c_tx=1e-5, headroom_margin=100.0, earliest=0):
     """Returns dict(status, x={(route, fuel, k): liters}, served, unmet, demand, seconds).
 
     demand: optional {(station, fuel, tick): liters} overriding the formula (hindsight bound only).
+    earliest: first offset at which a new shipment can really be submitted (measured execution lag;
+    0 in stepped mode). Shipments before it are impossible, so they are fixed to zero (plan §9.5).
     """
     t0 = time.perf_counter()
     v, H = snap["tick"], horizon
@@ -64,7 +66,8 @@ def solve(snap, horizon=96, demand=None, stress=1.0, weights="decreasing",
         for f in FUELS:
             for k in range(H):
                 # ponytail: a disrupted route / closed station is assumed closed for the whole horizon until M3 reads event end ticks
-                x[r["id"], f, k] = V.add(hi=None if usable else 0.0, cost=c_tx * r["transit_ticks"])
+                x[r["id"], f, k] = V.add(hi=None if usable and k >= earliest else 0.0,
+                                         cost=c_tx * r["transit_ticks"])
 
     # depots
     created_now = {d: 0.0 for d in snap["depots"]}

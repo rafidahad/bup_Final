@@ -17,6 +17,7 @@ Record only what was actually done and verified — no planned work written as f
 |---|---|
 | `BUP_Fuel_Supply_Deterministic_MVP_Full_Plan2.md` | Implementation plan (Revision 3 + phase-boundary correction). No-AI/ML boundary in §1.2, milestones in §17, definition of done in §22, deferred AI/ML work in §25. |
 | `BUP_Fuel_Supply_Simulator_Integration_and_Interaction_Guide.md` | Authoritative simulator API contract. Wins over the plan on any conflict. |
+| `Problem_Statement_BUP_CSE_Fest_2026.pdf` | **Official problem statement and requirements** (11 pages; received 2026-09-29, after implementation had started). Defines deliverables (§19) and evaluation weights (§23). |
 
 ## Project constraints
 
@@ -77,6 +78,15 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 | C05/C06 | Server checks destination headroom against **current inventory only** — in-transit is NOT reserved. On arrival, stock is added, **clipped to capacity (excess silently lost)**, then demand is served. Probe: 9,000 + 2×6,000 into 15,000 tank → 5,825 L lost. **Our executor must reserve headroom for in-transit arrivals.** |
 | C10 | Replay same key+body → **201** with the same allocation (no duplicate). Changed body → 409 `IDEMPOTENCY_KEY_MISMATCH`. Replay after cancel → 201 returning the CANCELLED allocation (no new shipment). |
 | C15 | `stale_data` only adds `X-Simulator-Stale: true`; bodies are current (tick matches `/v1/health`, inventory keeps moving). Safe to keep using the data. |
+| C07 | `depot_constraint` → status `CONSTRAINED` but **no numeric effect**: `dispatch_capacity_per_tick` stays 12,000 and the full 12,000/tick is still accepted. |
+| C08 | Events become ACTIVE at the **start** of their `start_tick` processing, before departures; active window = [start, end). A PENDING allocation whose route is disrupted in its creation tick → `FAILED` / `ROUTE_UNAVAILABLE`, `allocation_failures` +1. IN_TRANSIT shipments are unaffected (arrive normally). POST to a DISRUPTED route → 409 `ROUTE_DISRUPTED` (free). |
+| C18 | **A FAILED allocation is NOT refunded** — depot stock stays deducted (Gazipur petrol 44,000 before and after failure). Fuel is lost. Executor must not POST on a route with a disruption starting this tick. |
+| C09 | `station_outage`: station → `OUTAGE`; **all demand during outage is unmet** (served 0) and inventory is frozen; shipments arriving during outage are still added; POST → 409 `STATION_CLOSED`. |
+| C12 | Overlapping spikes compose multiplicatively (1.5 × 2.0 = 3.0) and divide back on resolve; `/v1/stations.demand_multiplier` always shows the product. |
+| C13 | At activation, `shipment_delay` shifts **every not-yet-arrived row** of the filtered depot(s)/fuel(s) by `delay_ticks` (status DELAYED); `supply_shortfall` multiplies **every future row** by `factor` (whole remaining schedule, one-shot, not restored). |
+| C14 | `stream_disconnect` blocks only **new** `/v1/stream` connections (503); an already-open stream keeps delivering events. |
+| C16 | Reset: `/v1/instance` keeps `id` 1, same scenario/seed; `tick` → 0, `sim_time` → start, `/v1/allocations` empty. **No `simulator.notice` reached an already-open SSE subscriber.** Detect reset by tick going backwards or our allocation ids vanishing. |
+| C17 | Fractional quantities accepted (1,234.567 L). `/v1/demand-history` is newest-first (id desc); `limit` takes the newest rows. |
 
 ## Decisions
 
@@ -89,7 +99,7 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 ## Open questions / blockers
 
 - Participant brief (evaluation horizon, scoring) not available. With only ~5.9 days of fuel, run length decides how much unmet demand is unavoidable.
-- Remaining probes (C07–C09, C11–C14, C16–C19) scheduled for Milestones 2–3.
+- C11 (demand timing/factor composition) left for the AI/ML phase with the residual report (projection is a frozen component).
 
 ## Results (stepped, baseline scenario, seed 12345, no events, default 15-min tick)
 
@@ -113,11 +123,22 @@ LP solve time: 84 solves, p50 0.17 s, max 0.39 s, all optimal. **Issue:** LP sen
 
 ## Next up (non-AI/ML only)
 
-1. Remaining probes C07–C09, C12–C14, C16–C18.
-2. Fault handling: degraded mode (plan §12.1), retries/backoff, SSE consumer with polling fallback, event-triggered replan; F01–F05 scenarios.
-3. Milestone 4 dashboard; Milestone 5 persistence/outbox/packaging.
+1. Fault handling: degraded mode (plan §12.1), retries/backoff, SSE consumer with polling fallback, event-triggered replan; F01–F05 scenarios.
+2. Milestone 4 dashboard; Milestone 5 persistence/outbox/packaging.
 
 ## Log
+
+### 2026-09-29 — Fault handling, live controller, API skeleton (before problem statement arrived)
+- `sim.py`: GET retries with backoff on 503/transport errors. `execute.py`: parallel snapshot (8 reads in one round trip — latency fault costs one delay, not eight), events in snapshot, **route-disruption guard** (never POST on a route disrupted now/next tick; C08/C18: fuel would be lost).
+- `scenarios.py`: 11 crisis recipes (S02–S11). Harness: `--recipe`, `--announced`, failed-allocation count. Verified: S04 LP run → 0 FAILED allocations.
+- `controller.py`: live loop (observe/manual/auto), reset detection by tick rollback, degraded/recovered incidents, measured execution lag. `livetest.py`: live fault runs at normal speed.
+- **Finding:** LP is near-optimal stepped but fragile live (just-in-time deliveries, no safety stock; 0.873 service at tick 400 live vs threshold 1.000). Modelling the measured execution lag in the LP (`earliest=`) → 0.977. Remaining gap needs safety buffers (§8.3). Live default policy = threshold for now.
+- `api.py`: FastAPI `/api/*` skeleton (status, overview, allocations, plans, execute, cancel, mode, policy, incidents). Not yet run end-to-end.
+- Frontend not started. Work paused: official problem statement received → full plan review before further execution.
+
+### 2026-09-29 — Remaining contract probes
+- Added and ran C07, C08 (+C18), C09, C12, C13, C14, C16, C17 in `fuelops/probes.py`. Findings in **Simulator semantics**.
+- Execution-relevant: FAILED shipments lose their fuel (no refund); outages make all demand unmet; shortfall/delay events rewrite the whole remaining schedule; reset is silent on existing SSE streams.
 
 ### 2026-09-29 — Request consolidation
 - `LPPolicy(batch=True)` (default `lp`): at each solve, sends the next 8 ticks of planned flow per route/fuel at once, executor reserves in-transit headroom. Model unchanged.

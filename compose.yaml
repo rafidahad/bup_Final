@@ -17,6 +17,16 @@ services:
       timeout: 4s
       retries: 10
 
+  # Extra simulators for the parallel benchmark only (`--profile bench`); never started by default.
+  sim-b: &bench-sim
+    image: asifmahmoud414/bup-fuel-supply-simulator:1.0.0
+    profiles: ["bench"]
+    environment:
+      TICK_MINUTES: ${TICK_MINUTES:-15}
+      SIMULATOR_START_MODE: paused
+  sim-c: *bench-sim
+  sim-d: *bench-sim
+
   fuelops:
     build: .
     image: fuelops:${FUELOPS_VERSION:-dev}

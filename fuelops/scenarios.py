@@ -20,4 +20,20 @@ RECIPES = {
         ("demand_spike", 150, 40, {"region_ids": ["region-chattogram"], "multiplier": 1.5}),
         ("supply_shortfall", 125, 5, {"depot_ids": ["depot-patiya"], "factor": 0.7}),
     ],
+    # Hold-out recipes: other timings and severities, so parameters are not tuned to s02–s11 alone.
+    "h1_tongi_late": [("route_disruption", 330, 40, {"route_ids": ["route-gazipur-tongi"]})],
+    "h2_coxs_long": [("route_disruption", 120, 90, {"route_ids": ["route-patiya-coxsbazar"]})],
+    "h3_mirpur_outage_spike": [
+        ("station_outage", 250, 30, {"station_ids": ["station-mirpur"]}),
+        ("demand_spike", 240, 48, {"region_ids": ["region-dhaka"], "multiplier": 1.4}),
+    ],
+    "h4_gazipur_shortfall": [("supply_shortfall", 40, 5, {"depot_ids": ["depot-gazipur"], "factor": 0.6})],
+    "h5_cross_routes_spike": [
+        ("route_disruption", 150, 80, {"route_ids": ["route-patiya-mirpur", "route-gazipur-karnaphuli"]}),
+        ("demand_spike", 150, 60, {"region_ids": ["region-chattogram"], "multiplier": 1.3}),
+    ],
+    "h6_delay_and_route": [
+        ("shipment_delay", 100, 5, {"depot_ids": ["depot-patiya"], "delay_ticks": 24}),
+        ("route_disruption", 110, 40, {"route_ids": ["route-patiya-karnaphuli"]}),
+    ],
 }

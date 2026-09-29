@@ -42,6 +42,8 @@ docker compose up -d                      # simulator on http://localhost:18000 
 .venv/Scripts/python.exe -m fuelops.harness threshold none --ticks 672   # stepped benchmark → reports/
 ```
 
+Regression benchmark (resets every simulator it uses — never point it at the demo/production one): `docker compose --profile bench up -d sim-b sim-c sim-d`, then `docker compose run --rm --no-deps -v "$PWD/reports:/app/reports" fuelops python -m fuelops.bench lp-buffer threshold --sims http://simulator-api:8000,http://sim-b:8000,http://sim-c:8000,http://sim-d:8000 --max-total 23783` (17 recipes × 5 days, ~5 min; exit 1 if `lp-buffer` gets worse). Stop the extras with `docker compose --profile bench stop sim-b sim-c sim-d`.
+
 Full stack: `docker compose up -d --build` → app http://localhost:8100, Grafana http://localhost:3300, Prometheus :9090, simulator :18000 (all 127.0.0.1).
 
 Production (Dokploy on VPS, 2 core / 8 GB, x86_64 required — simulator image is amd64 only): Compose service from this repo, env pasted from `.env.production` (gitignored, generated locally; template `.env.example`). Domains in Dokploy's Domains tab: `tae.rafidahad.me` → fuelops:8100, `tae-grafana.rafidahad.me` → grafana:3000. Never expose simulator (`/admin` has no auth) or Prometheus. Cloudflare proxy off (DNS only) so Traefik gets Let's Encrypt certs.
@@ -232,6 +234,10 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 - Execute the 24-hour cut (plan R4.3): M3 → M5 → M7 → M6 → M4 → M8 → M9.
 
 ## Log
+
+### 2026-09-29 — Regression benchmark in the repo
+- `fuelops/scenarios.py`: hold-out recipes h1–h6 (previously only in an ad-hoc runner). `fuelops/bench.py`: all policies × recipes in parallel over several simulators, table + total, `--max-total` gate, JSON in `reports/`. `compose.yaml`: `bench` profile with sim-b/c/d (not started by default).
+- Verified: `bench lp-buffer threshold` over 4 simulators reproduces the sweep table exactly (lp-buffer 23,783 L, threshold 108,406 L), 5.5 min wall.
 
 ### 2026-09-29 — Deployment prep (Dokploy) + gitignore
 - Stack verified on Linux: `docker compose up -d --build` → all services healthy; 5/5 tests pass in the image; ~240 MB RAM total.

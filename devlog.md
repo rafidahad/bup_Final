@@ -62,10 +62,10 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 | 2 | LP planner + hindsight bound | Done (stepped); live needs safety buffer (D4) |
 | M3 | Decision-support core: detectors, stockout risk, recommendation cards, what-if, approval queue, audit | Done |
 | M4 | Resilience behaviours (PS §11 mappings) | Mostly done: validation+alert, circuit breaker, cached state, kill switch → fallback, confidence gate; demos pending |
-| M5 | Operator web app (5 views + lab) | Not started (API skeleton exists) |
-| M6 | Observability: Prometheus, Grafana, logs, health | Not started |
-| M7 | DevOps: Dockerfile, full compose, CI | Not started (simulator compose only) |
-| M8 | Load testing (k6) | Not started |
+| M5 | Operator web app (5 views + lab) | Done (verified in browser against live simulator) |
+| M6 | Observability: Prometheus, Grafana, logs, health | Done (Prometheus scraping, Grafana dashboard provisioned, /api/health, health view) |
+| M7 | DevOps: Dockerfile, full compose, CI | Done locally (compose healthy); CI pushed, first run pending |
+| M8 | Load testing (k6) | Done (3 runs, see results) |
 | M9 | Architecture diagram, README, demo script, final check | Not started |
 | Next | Learned forecast, LLM explanations, tuning (plan §25) | Deferred |
 
@@ -141,6 +141,19 @@ LP solve time: 84 solves, p50 0.17 s, max 0.39 s, all optimal. **Issue:** LP sen
 | stream_disconnect | 1.0000 | 0 | 0 | — (REST polling unaffected) |
 
 `unavailable` blocks every `/v1` call including POSTs for ~120 ticks, so the loss is only preventable by holding more stock beforehand. Live runs are wall-clock based and not byte-identical; single runs, not distributions yet.
+
+### Load testing (PS §17) — k6 against the containerized backend, simulator running live in auto mode
+
+Workload: `ops/k6/load.js`. Scenario "dashboard" = what an operator's browser polls (status + overview + allocations per iteration), ramping 0 → 10 → 50 → 100 virtual users over 100 s. Scenario "decisions" = GET recommendations (risk, impact, alternatives) + health at a constant arrival rate. Command:
+`MSYS_NO_PATHCONV=1 docker run --rm --network hackathaon_bup_final_default -v "$(pwd -W)/ops/k6:/scripts" -e BASE=http://fuelops:8100 [-e PROFILE=realistic] grafana/k6 run --summary-export /scripts/summary.json /scripts/load.js`
+
+| Run | Profile | Throughput | Errors | Dashboard p50 / p95 / p99 | Decision path p50 / p95 / p99 | Backend CPU / memory (peak) |
+|---|---|---:|---:|---|---|---|
+| 1 | stress (no think time, 20 decision req/s) | 121 req/s | 0 / 12,125 | 1.44 s / 2.72 s / 2.84 s | 1.16 s / 2.56 s / 2.80 s | 118% / 101 MB |
+| 2 | stress, after per-tick JSON cache | **260 req/s** | 3 / 25,965 (0.01%) | 419 ms / 1.54 s / 1.85 s | 460 ms / 1.61 s / 1.91 s | 142% / 110 MB |
+| 3 | **realistic** (each dashboard polls once a second, 5 decision req/s) | 128 req/s | **0 / 12,933** | **32 ms / 275 ms / 432 ms** | **8 ms / 181 ms / 347 ms** | 113% / 132 MB |
+
+Findings: the limit is CPU in the single backend process (one process by design: one operational writer). Run 1 recomputed demand projections and re-encoded the growing shipment ledger on every request; caching serialized JSON once per tick and capping the ledger at 200 rows doubled throughput. Capacity ≈ 260 req/s ≈ 65 dashboards polling 4 endpoints each second; at realistic load p95 stays under 300 ms. API load never reaches the simulator (metrics and health are cached). Raw summaries and `docker stats` samples: `ops/k6/summary_*.json`, `ops/k6/stats_run*.csv`.
 
 ## Next up
 

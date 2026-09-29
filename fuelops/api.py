@@ -5,8 +5,10 @@ Env: SIM_URL, FUELOPS_POLICY (lp-buffer), FUELOPS_MODE (manual — human review 
      FUELOPS_OPERATOR_TOKEN (when set, required as X-Operator-Token for sensitive actions, PS §18),
      FUELOPS_AUTOSTART (1 = start the controller thread; tests set 0).
 """
+import json
 import os
 import pathlib
+import threading
 import time
 from collections import deque
 from contextlib import asynccontextmanager
@@ -78,6 +80,26 @@ def _snap():
     return ctl.snap
 
 
+_cache: dict = {}
+_cache_lock = threading.Lock()
+
+
+def _per_tick(name, build):
+    """Serve read models from JSON serialized once per simulator tick (and per decision change).
+
+    Load test run 1 showed per-request recomputation and encoding capped the backend at ~120 req/s
+    with p95 ~2.7 s; the underlying data only changes when the controller processes a tick."""
+    key = (ctl.run_id, ctl.last_tick, ctl.cycles, len(ctl.cards))
+    with _cache_lock:
+        hit = _cache.get(name)
+        if hit and hit[0] == key:
+            return Response(hit[1], media_type="application/json")
+    body = json.dumps(build(), default=float).encode()
+    with _cache_lock:
+        _cache[name] = (key, body)
+    return Response(body, media_type="application/json")
+
+
 # ---- read models ----------------------------------------------------------------------------------
 @app.get("/api/status")
 def status():
@@ -95,7 +117,12 @@ def status():
 
 @app.get("/api/overview")
 def overview():
-    s = _snap()
+    _snap()
+    return _per_tick("overview", _overview)
+
+
+def _overview():
+    s = ctl.snap
     metrics = ctl.sim_metrics  # cached by the controller; None = unavailable, never invented
     region = {r["id"]: r for r in s["regions"]}
     tm, tick = s["tick_minutes"], s["tick"]
@@ -134,6 +161,10 @@ def overview():
 
 @app.get("/api/recommendations")
 def recommendations():
+    return _per_tick("recommendations", _recommendations)
+
+
+def _recommendations():
     cards = sorted(ctl.cards.values(), key=lambda c: (-(c["before"]["risk"]), c["before"]["stockout_hours"] or 1e9))
     return {"tick": ctl.snap["tick"] if ctl.snap else None, "mode": ctl.mode, "source": ctl.source, "cards": cards}
 
@@ -144,10 +175,14 @@ def alerts():
 
 
 @app.get("/api/allocations")
-def allocations(status: str | None = None, station: str | None = None, fuel: str | None = None):
+def allocations(status: str | None = None, station: str | None = None, fuel: str | None = None, limit: int = 200):
+    """Newest first (simulator order), capped: the ledger grows all run long."""
     rows = _snap()["allocs"]
+    limit = min(max(limit, 1), 1000)
+    if not (status or station or fuel) and limit == 200:
+        return _per_tick("allocations", lambda: rows[:200])
     return [a for a in rows if (not status or a["status"] == status)
-            and (not station or a["destination_station_id"] == station) and (not fuel or a["fuel_type"] == fuel)]
+            and (not station or a["destination_station_id"] == station) and (not fuel or a["fuel_type"] == fuel)][:limit]
 
 
 @app.get("/api/decisions")

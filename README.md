@@ -2,9 +2,22 @@
 
 An operations platform for the BUP CSE Fest 2026 fuel supply simulator. It watches the simulated Bangladesh fuel network, predicts shortages, recommends and sends allocations, explains each decision, and keeps working when parts of the system fail.
 
-Everything runs locally against the official simulator image (`asifmahmoud414/bup-fuel-supply-simulator:1.0.0`, unchanged). Progress, measured results, and design decisions are in [`devlog.md`](devlog.md). The full plan is in [`BUP_Fuel_Supply_Deterministic_MVP_Full_Plan2.md`](BUP_Fuel_Supply_Deterministic_MVP_Full_Plan2.md).
+The deployed stack uses the official simulator image (`asifmahmoud414/bup-fuel-supply-simulator:1.0.0`, unchanged). Progress, measured results, and design decisions are in [`devlog.md`](devlog.md). The full plan is in [`BUP_Fuel_Supply_Deterministic_MVP_Full_Plan2.md`](BUP_Fuel_Supply_Deterministic_MVP_Full_Plan2.md).
 
-## Run it
+## Live deployment
+
+| What | Where |
+|---|---|
+| Operator application | [Open Fuel Operations](https://tae.rafidahad.me/#home) |
+| Grafana dashboard (anonymous view) | [Open live Grafana](https://tae-grafana.rafidahad.me/) |
+| Prometheus | Internal service; view monitoring through [Grafana](https://tae-grafana.rafidahad.me/) |
+| Simulator API (direct) | Internal service; accessed by the application backend |
+| Backend health (JSON) | [Live component health](https://tae.rafidahad.me/api/health) |
+| Backend metrics | [Live Prometheus metrics](https://tae.rafidahad.me/metrics) |
+
+The simulator starts paused. Start its clock using **Start** in the application top bar, or set `SIMULATOR_START_MODE=running` in `.env`. At the default speed one simulated day passes in 12 seconds; for a human-paced demo set `SIMULATION_SPEED=1` (one day ≈ 96 s).
+
+## Run locally
 
 Requirements: Docker with Compose v2.
 
@@ -13,22 +26,11 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-| What | Where |
-|---|---|
-| Operator application | http://localhost:8100 |
-| Grafana dashboard (anonymous view) | http://localhost:3300 |
-| Prometheus | http://localhost:9090 |
-| Simulator API (direct) | http://localhost:18000/docs |
-| Backend health (JSON) | http://localhost:8100/api/health |
-| Backend metrics | http://localhost:8100/metrics |
-
-The simulator starts paused. Start its clock from **Incidents and lab → Run**, or set `SIMULATOR_START_MODE=running` in `.env`. At the default speed one simulated day passes in 12 seconds; for a human-paced demo set `SIMULATION_SPEED=1` (one day ≈ 96 s).
-
 Stop with `docker compose down` (add `-v` to also delete the decision history volume).
 
 ### Configuration (`.env`)
 
-| Variable | Default | Meaning |
+| Variable | Default / production value | Meaning |
 |---|---|---|
 | `SIMULATION_SPEED` | 8 | Simulator ticks per real second |
 | `TICK_MINUTES` | 15 | Simulated minutes per tick |
@@ -39,7 +41,7 @@ Stop with `docker compose down` (add `-v` to also delete the decision history vo
 | `FUELOPS_OPERATOR_TOKEN` | empty | When set, lab controls, mode and planner changes require this token |
 | `GRAFANA_ADMIN_PASSWORD` | change-me | Grafana admin login |
 | `GRAFANA_PORT` | 3300 | Grafana host port (3000 is taken by Dokploy's panel) |
-| `GRAFANA_ROOT_URL` | http://localhost:3300 | Grafana's public URL (production: https://tae-grafana.rafidahad.me) |
+| `GRAFANA_ROOT_URL` | https://tae-grafana.rafidahad.me | Set to the deployed Grafana URL in production; local development uses the local Grafana address |
 
 No secrets are stored in the repository. All ports bind to `127.0.0.1`.
 

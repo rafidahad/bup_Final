@@ -1,6 +1,10 @@
 import { useEffect, useState } from "react"
 import { History as HistoryIcon, House, Send, ServerCog } from "lucide-react"
 import { toast } from "sonner"
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Toaster } from "@/components/ui/sonner"
 import { type Card, type Status, api, usePoll } from "@/lib/api"
@@ -92,6 +96,21 @@ export default function App() {
                 <Button variant="outline" onClick={() => send("/api/lab/control", { action: running ? "pause" : "run" }, "POST")}>
                   {running ? "Pause" : "Start"}
                 </Button>
+                {!running && (status.tick ?? 0) > 0 && (
+                  <AlertDialog>
+                    <AlertDialogTrigger render={<Button variant="outline" />}>Reset</AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>Restart the simulation from Day 1?</AlertDialogTitle>
+                        <AlertDialogDescription>All tanks, depots and shipments go back to the start. Your decision history in this app is kept.</AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                        <AlertDialogAction variant="destructive" onClick={() => send("/api/lab/control", { action: "reset" }, "POST")}>Reset</AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
               </div>
               <fieldset>
                 <legend className="text-sm text-muted-foreground">Sending fuel</legend>

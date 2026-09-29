@@ -235,6 +235,10 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 
 ## Log
 
+### 2026-09-29 — Reset button in the top bar
+- `web/src/App.tsx`: "Reset" next to Start/Pause, shown only when paused and past Day 1 00:00; confirmation dialog (same text as System → Test tools), then `POST /api/lab/control {"action":"reset"}`.
+- Verified in the browser on the local stack: step to 00:15 → Reset → confirm → Day 1 00:00, paused, "not started" banner, Reset hidden. `npm run build` passes.
+
 ### 2026-09-29 — Default operating mode = auto
 - `compose.yaml`, `.env.example`, `fuelops/api.py`, README, Project_Guidelines: `FUELOPS_MODE` defaults to `auto` (was `manual`, which ships nothing without an operator — an automated scorer would see almost no deliveries). Low-confidence cards still wait for review (PS §24). The production server env already sets `auto`.
 

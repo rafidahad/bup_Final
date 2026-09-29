@@ -241,7 +241,9 @@ class Controller:
         confs = [c["confidence"] for c in self.cards.values()]
         M.MEAN_CONFIDENCE.set(sum(confs) / len(confs) if confs else 0)
         if self.mode == "auto":
-            for card in list(self.cards.values()):
+            # most urgent first: dispatch budget is shared per depot per tick
+            urgent = sorted(self.cards.values(), key=lambda c: (-c["before"]["risk"], c["before"]["stockout_hours"] or 1e9))
+            for card in urgent:
                 if card["allocations"] and not card["review_required"]:
                     self._execute_card(snap, card, "auto_approved", "controller")
 
@@ -251,12 +253,16 @@ class Controller:
 
     # ---- acting -----------------------------------------------------------------------------------
     def _execute_card(self, snap, card, status, who):
-        before = self.executor.stats["liters"]
         wants = [(a["route_id"], card["fuel"], a["liters"]) for a in card["allocations"]]
-        self.executor.execute(snap, wants)
-        sent = self.executor.stats["liters"] - before
-        done = {(a["route_id"], card["fuel"]) for a in card["allocations"]}
-        self.last_proposals = [p for p in self.last_proposals if (p[0], p[1]) not in done]
+        sent_by = self.executor.execute(snap, wants)
+        sent = sum(sent_by.values())
+        # keep what could not be sent this tick (e.g. depot dispatch budget used up); it goes next tick
+        left = []
+        for r, f, q in self.last_proposals:
+            rest = q - sent_by.get((r, f), 0.0) if f == card["fuel"] and any(a["route_id"] == r for a in card["allocations"]) else q
+            if rest > 1:
+                left.append((r, f, rest))
+        self.last_proposals = left
         self.cards.pop(card["id"], None)
         if sent > 0 or status != "auto_approved":
             store.record_decision(self.run_id, snap["tick"], card, status, who,

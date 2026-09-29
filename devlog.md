@@ -46,12 +46,12 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 
 ## Current status
 
-- Date: 2026-09-29
-- **Official problem statement received → plan Revision 4.** Execution paused until the owner answers D1–D4 (plan R4.3).
-- Scope rule (owner, earlier today): execute only components that will not get AI/ML later. Revision 4 D1 proposes adjusting it for Predict/Detect (statistical, not ML) — pending.
-- Done: Milestones 0–2, all contract probes except C11, fault retries, disruption guard, live controller, API skeleton.
-- Code: `fuelops/sim.py`, `probes.py`, `execute.py`, `policies.py`, `projection.py`, `lp.py`, `hindsight.py`, `harness.py`, `scenarios.py`, `controller.py`, `livetest.py`, `api.py`; `tests/test_lp.py` (4 passing); `compose.yaml`.
-- Best measured decision quality: **LP, 7 simulated days (stepped): service 0.8504, 97,417 L unmet — 3 L from the perfect-hindsight bound** (run `b982151b`). Live, threshold is more robust (see Log).
+- Date: 2026-09-29. Plan Revision 4 executed within the 24-hour cut (D2). **Milestones M3–M9 done**; the AI/ML phase (plan §25) is deferred by owner decision.
+- Run: `cp .env.example .env && docker compose up -d --build` → app http://localhost:8100, Grafana :3000, Prometheus :9090 (README).
+- Verified: 11 automated tests pass; full stack builds and runs healthy **from a clean clone** (separate compose project); CI workflow pushed (repo is private — check the Actions tab for the first run result).
+- Decision quality: LP within 3 L of the perfect-hindsight bound over 7 simulated days (stepped); live, lp-buffer serves 100% over 4.2 days and through a ×2.2 spike combined with a primary-route disruption (0 FAILED shipments).
+- Load: realistic profile 128 req/s, 0 errors, dashboard p95 275 ms; capacity limit ~260 req/s (single backend process by design).
+- Known limits: C11 (demand timing at hour boundaries) not probed; live results are single runs, not distributions; confidence and risk use a normal approximation of observed noise (documented, not a trained model).
 
 ## Milestones (plan Revision 4, R4.6)
 
@@ -64,9 +64,9 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 | M4 | Resilience behaviours (PS §11 mappings) | Done (all four mappings demonstrated; 6 resilience tests) |
 | M5 | Operator web app (5 views + lab) | Done (verified in browser against live simulator) |
 | M6 | Observability: Prometheus, Grafana, logs, health | Done (Prometheus scraping, Grafana dashboard provisioned, /api/health, health view) |
-| M7 | DevOps: Dockerfile, full compose, CI | Done locally (compose healthy); CI pushed, first run pending |
+| M7 | DevOps: Dockerfile, full compose, CI | Done (clean-clone deploy verified locally; CI result in GitHub Actions) |
 | M8 | Load testing (k6) | Done (3 runs, see results) |
-| M9 | Architecture diagram, README, demo script, final check | In progress (README + diagram + demo script done) |
+| M9 | Architecture diagram, README, demo script, final check | Done |
 | Next | Learned forecast, LLM explanations, tuning (plan §25) | Deferred |
 
 ## Simulator semantics (verified by probes)
@@ -194,6 +194,12 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 - Execute the 24-hour cut (plan R4.3): M3 → M5 → M7 → M6 → M4 → M8 → M9.
 
 ## Log
+
+### 2026-09-29 — Final verification and two execution fixes
+- Clean clone → `docker compose -p verify up -d --build` on alternate ports: all 5 components healthy, simulator steps, metrics exposed, web app and Grafana HTTP 200; torn down.
+- Crisis replay (Karnaphuli spike ×2.2 + Patiya→Karnaphuli disrupted) exposed octane starvation: a batch exceeded the 12,000 L/tick depot dispatch budget and the unsent remainder was dropped. Fix: executor returns liters sent per route/fuel, the controller carries remainders to the next tick, and auto mode executes the most urgent cards first. Replay: all three fuels rerouted via Gazipur (octane 3,654 L), 0 FAILED, 100% served.
+- Route map labels moved to 30% along each line (crossing 4-tick routes overlapped); verified by measuring label boxes (no overlaps).
+- README (setup, configuration, Mermaid architecture diagram) and demo script (PS §22) written.
 
 ### 2026-09-29 — M3 decision support (+ most of M4)
 - `intel.py`: NoiseModel (relative demand noise per profile from observed history, residual computed once per row, 3-day window), `project()` (time to stockout, 12 h stockout risk via normal approximation, what-if arrivals), `confidence()` (0.5 from guide prior → 1.0 with 3 days of history; ×0.5 degraded, ×0.8 active crisis), 4 rule-based detectors (anomalous demand z>4, abnormal inventory vs ≥8-tick reference, dispatch bottleneck ≥90%, public disruptions).

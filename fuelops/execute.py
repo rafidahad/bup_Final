@@ -88,6 +88,7 @@ class Executor:
                 room[(sid, f)] = cap - st["inventory"][f] - (incoming_total(snap, sid, f) if self.reserve_incoming else 0)
 
         blocked = blocked_routes(snap)
+        sent = {}  # (route, fuel) -> liters accepted, so callers can carry unsent remainders forward
         for route_id, fuel, liters in wants:
             r = snap["routes"][route_id]
             d, s = r["source_depot_id"], r["destination_station_id"]
@@ -104,12 +105,14 @@ class Executor:
                 chunk = min(per_req, qty)
                 qty -= chunk
                 if self._post(tick, d, s, route_id, fuel, chunk):
+                    sent[(route_id, fuel)] = sent.get((route_id, fuel), 0.0) + chunk
                     depot_stock[(d, fuel)] -= chunk
                     budget[d] -= chunk
                     if self.reserve_incoming:
                         room[(s, fuel)] -= chunk
                 else:
                     break  # rejected: let the next decision re-read state
+        return sent
 
     def _post(self, tick, depot, station, route, fuel, qty):
         self.seq += 1

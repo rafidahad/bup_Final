@@ -21,7 +21,8 @@ export function NetworkMap({ depots, stations, routes, allocations }: {
         const y2 = yOf(r.destination_station_id, STATION_Y, 0)
         const down = r.status !== "AVAILABLE"
         const load = moving.get(r.id) ?? 0
-        const mx = (X_DEPOT + X_STATION) / 2, my = (y1 + y2) / 2
+        // label 30% along the line from the depot: crossing routes meet mid-way, so their labels would collide there
+        const t = 0.3, mx = X_DEPOT + (X_STATION - X_DEPOT) * t, my = y1 + (y2 - y1) * t
         return (
           <g key={r.id}>
             <line x1={X_DEPOT + 10} y1={y1} x2={X_STATION - 10} y2={y2}

@@ -95,6 +95,7 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 
 ## Decisions
 
+- 2026-09-29 — `lp-buffer` = 48 h horizon + 8 h buffer (was 24 h + 4 h): 64% less unmet over 17 crisis recipes, same 7-day result (see Results).
 - 2026-09-29 — Owner answered D1–D4 (plan R4.3); < 24 h to judging → 24-hour cut order.
 
 - 2026-09-29 — Simulator host port **18000** (`SIM_PORT`), bound to 127.0.0.1. Reason: Windows/Hyper-V reserves TCP 7983–8082 on this PC, so 8000 cannot bind. Image unchanged.
@@ -128,6 +129,38 @@ C19: demand identical across `none` and `threshold` runs (8,064 rows, max diff 0
 LP solve time: 84 solves, p50 0.17 s, max 0.39 s, all optimal. **Issue:** LP sends 5,424 small POSTs (~86 L avg) vs 111 for threshold → 396 s wall per 7 d vs 93 s, and would be fragile under latency faults. Fix in executor (request consolidation) — Milestone 3.
 
 "Fuel lost" = start stock + arrived supply − served − (depot + station + in-transit stock) at the end; with no shipping the depots overflow at supply arrivals. 7 days exceeds the ~5.9-day fuel ceiling (C00), so some unmet demand is unavoidable there; the hindsight bound (Milestone 2) will show how much.
+
+### Crisis comparison and horizon/buffer sweep (stepped, 5 days = 480 ticks, surprise events, code at `4ec7eaa`)
+
+Unmet liters. `s*` = `fuelops/scenarios.py` recipes; `h*` = hold-out recipes with other timings/severities (defined in the ad-hoc runner, not used to pick parameters first). H = LP horizon ticks, B = `buffer_ticks`.
+
+| Recipe | threshold | H96 B16 (old default) | H192 B16 | H192 B24 | **H192 B32 (new default)** |
+|---|---:|---:|---:|---:|---:|
+| baseline | 4,304 | 2,583 | 0 | 0 | **0** |
+| s02 spike station | 4,304 | 2,583 | 0 | 0 | **0** |
+| s03 spike region | 6,196 | 0 | 0 | 0 | **0** |
+| s04 primary route down | 9,181 | 3,827 | 0 | 0 | **0** |
+| s05 Tongi isolated | 4,345 | 4,756 | 2,344 | 247 | **0** |
+| s06 Cox's Bazar isolated | 6,782 | 2,731 | 148 | 720 | 1,647 |
+| s07 depot constraint | 4,304 | 2,583 | 0 | 0 | **0** |
+| s08 supply delay | 4,304 | 2,794 | 0 | 0 | **0** |
+| s09 supply shortfall | 4,304 | 3,071 | 0 | 0 | **0** |
+| s10 station outage | 10,146 | 6,828 | 5,842 | 5,842 | 5,842 |
+| s11 overlap | 4,519 | 1,017 | 0 | 0 | **0** |
+| h1 Tongi route, late | 4,943 | 2,583 | 0 | 0 | **0** |
+| h2 Cox's route, 90 ticks | 9,325 | 6,533 | 5,587 | 4,156 | **2,225** |
+| h3 Mirpur outage + Dhaka spike | 17,528 | 15,807 | 13,224 | 13,224 | 13,224 |
+| h4 Gazipur shortfall 0.6 | 4,304 | 4,067 | 0 | 0 | **0** |
+| h5 cross routes + spike | 5,785 | 3,826 | 0 | 0 | 845 |
+| h6 delay + route | 3,833 | 0 | 0 | 0 | **0** |
+| **Total, 17 recipes** | **108,407** | **65,589** | **27,145** | **24,189** | **23,783** |
+
+- 7-day baseline: every LP setting = 97,414 L = the hindsight bound; threshold 97,568.
+- Hindsight bound at 480 ticks = 0 L for baseline, s02, s03 (bound ignores route/supply/outage events, so it is only valid for demand-only recipes).
+- Remaining s10 / h3 loss is inside the outage window (served = 0 during outage, C09) → unavoidable. s06/h5 with B32 lose Cox's Bazar petrol after tick ~450 (end-of-supply squeeze; a larger buffer holds petrol elsewhere).
+- Cause of the old default's baseline loss: Cox's Bazar petrol from tick 450; a 24 h horizon cannot see the Patiya petrol squeeze.
+- 0 FAILED allocations in all 89 runs; threshold lost 366 L to overflow in s04. LP solve p50 0.09–0.11 s, max 0.16 s (H192).
+- Live check (8 ticks/s, 480 ticks, auto mode, one run each): H96 B16 → 2,582 L unmet (no fault), 14,848 L (500 ms latency fault); **H192 B32 → 0 L and 65 L**.
 
 ### Live fault runs (normal speed 8 ticks/s, threshold policy, 400 ticks ≈ 4.2 days, fault injected at 10 s for 15 s)
 
@@ -194,6 +227,12 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 - Execute the 24-hour cut (plan R4.3): M3 → M5 → M7 → M6 → M4 → M8 → M9.
 
 ## Log
+
+### 2026-09-29 — `lp-buffer` default changed to 48 h horizon, 8 h buffer
+- Goal: best automated score on an unknown image (other seed / events). Ran the crisis suite plus 6 hold-out recipes for threshold and four LP settings (89 stepped runs) and a live check; results in **Crisis comparison and horizon/buffer sweep** above.
+- `fuelops/policies.py`: `lp-buffer` = `LPPolicy(horizon=192, buffer_ticks=32, window=48)` (was horizon 96, buffer 16). Total 5-day unmet over 17 recipes 65,589 → 23,783 L; 7-day baseline stays at the hindsight bound.
+- Verified: 11/11 unit tests pass; `harness lp-buffer --recipe s05_tongi_isolated` → 0 L unmet.
+- Open: single run per cell; events are surprise only (LP still ignores scheduled events in `/v1/events`); buffer choice B24 vs B32 is close (24,189 vs 23,783 L).
 
 ### 2026-09-29 — Plan Revision 5 (AI/ML phase) drafted, awaiting approval
 - Reviewed the owner-supplied AI/ML guideline (Chronos-2-Small forecasts, existing LP, Grok incident summaries). Verified externally: model card (28M params, Apache-2.0, predict_df with quantiles), grok-4.7 availability and prices, Responses API structured output. Verified in code: all nine correctness gaps it names are real.

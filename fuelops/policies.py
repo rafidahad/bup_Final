@@ -85,5 +85,6 @@ class LPPolicy:
 
 POLICIES["lp"] = LPPolicy
 POLICIES["lp-tick"] = lambda: LPPolicy(batch=False)
-# D4: hand-set 4 h safety buffer; sends 12 h of planned flow per batch (operator-sized recommendations)
-POLICIES["lp-buffer"] = lambda: LPPolicy(buffer_ticks=16, window=48)
+# D4: hand-set 8 h safety buffer; sends 12 h of planned flow per batch (operator-sized recommendations).
+# 48 h horizon: 24 h cannot see the end-of-supply petrol squeeze at Patiya/Cox's Bazar (devlog, horizon sweep).
+POLICIES["lp-buffer"] = lambda: LPPolicy(horizon=192, buffer_ticks=32, window=48)

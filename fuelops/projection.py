@@ -25,3 +25,19 @@ def nominal(station, fuel, tick, region_factor, tick_minutes=15, stress=1.0):
     p = station["demand_profile"]
     return (DAILY[p][fuel] * tick_minutes / 1440 * hour_factor(p, tick, tick_minutes)
             * region_factor * station["demand_multiplier"] * stress)
+
+
+def closed_ticks(snap, station_id):
+    """Function t -> True while the station cannot sell (C09: demand unmet, stock frozen, arrivals still land).
+
+    Uses the current status plus public station_outage events (active or scheduled). A station that is
+    closed now with no visible end is treated as closed for the whole horizon."""
+    windows = []
+    for e in snap.get("events", ()):
+        ids = e["parameters"].get("station_ids") or []
+        if e["type"] == "station_outage" and e["status"] != "RESOLVED" and (not ids or station_id in ids):
+            windows.append((e["start_tick"], e["end_tick"]))
+    closed_now = snap["stations"][station_id]["status"] != "OPEN"
+    if closed_now and not any(a <= snap["tick"] < b for a, b in windows):
+        windows.append((snap["tick"], 10 ** 9))
+    return lambda t: any(a <= t < b for a, b in windows)

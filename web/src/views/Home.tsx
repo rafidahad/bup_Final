@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { type Alert, type Card, type FuelLevel, type Overview, type SimAllocation, type Station, usePoll } from "@/lib/api"
 import { type Level, LEVEL_TEXT, clock, depotName, describeAlerts, describeEvent, fuel, inTicks, level, liters, stationName } from "@/lib/text"
 import { cn } from "@/lib/utils"
+import { DemandForecast } from "./Forecast"
 import { FuelDot, Loading, Panel } from "./parts"
 
 const LEVEL_STYLE: Record<Level, string> = {
@@ -80,6 +81,8 @@ export function Home({ go }: { go: (v: "actions") => void }) {
           {data.stations.map(s => <StationCard key={s.id} station={s} now={data.tick} tickMinutes={tm} />)}
         </div>
       </section>
+
+      <DemandForecast />
 
       <div className="grid gap-4 xl:grid-cols-[3fr_2fr]">
         <Panel title="Roads between depots and stations">

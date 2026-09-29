@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from . import metrics as M
 from . import store
-from .controller import MODES, Controller
+from .controller import MODES, Controller, PlanChanged
 from .policies import POLICIES
 from .intel import project
 from .projection import nominal
@@ -201,6 +201,42 @@ def incidents():
     return list(reversed(ctl.incidents))
 
 
+@app.get("/api/forecasts")
+def forecasts():
+    """Observed demand, the formula, and the Chronos forecast band per station/fuel (next 12 h)."""
+    s = _snap()
+    fc = ctl.forecast
+    region = {r["id"]: r["demand_factor"] for r in s["regions"]}
+    tick, tm = s["tick"], s["tick_minutes"]
+    b = fc.bundle
+    obs = {}
+    for sid, f, t, d in ctl.noise.rows.values():
+        if t >= tick - 48:
+            obs.setdefault((sid, f), []).append((t, d))
+    series = []
+    for sid, st in s["stations"].items():
+        for f in FUELS:
+            ahead = list(range(tick, tick + 48))
+            item = {"station_id": sid, "fuel": f,
+                    "observed": [{"tick": t, "liters": d} for t, d in sorted(obs.get((sid, f), []))],
+                    "formula": [{"tick": t, "liters": nominal(st, f, t, region[st["region_id"]], tm)} for t in ahead],
+                    "chronos": None}
+            if b and (sid, f) in b["q50"]:
+                pts = [{"tick": t, "q10": b["q10"][(sid, f)][t - b["start"]], "q50": b["q50"][(sid, f)][t - b["start"]],
+                        "q90": b["q90"][(sid, f)][t - b["start"]]} for t in ahead if 0 <= t - b["start"] < b["horizon"]]
+                item["chronos"] = pts
+            series.append(item)
+    return {"tick": tick, "tick_minutes": tm, "status": fc.status, "evaluation": fc.evaluation(),
+            "bundle": {k: b[k] for k in ("cutoff", "issued_view_tick", "model", "revision", "service_ms")} if b else None,
+            "planner_uses": "formula", "series": series}
+
+
+@app.get("/api/cases")
+def cases():
+    """Incident cases with their latest summary (AI or template)."""
+    return {"ai_enabled": ctl.summaries.enabled(), "worker": ctl.summaries.status, "cases": store.latest_summaries(30)}
+
+
 @app.get("/api/plans")
 def plans():
     return {"policy": ctl.policy_name, "source": ctl.source, "solves": (getattr(ctl.policy, "log", None) or [])[-20:],
@@ -233,6 +269,14 @@ def health():
                               "detail": ctl.degraded}
     except (SimError, httpx.TransportError) as e:
         comps["simulator"] = {"status": "down", "detail": str(e)[:160]}
+    fs = ctl.forecast.status
+    comps["forecaster"] = {"status": "healthy" if fs["state"] == "ok" else "degraded" if fs["state"] in ("loading", "waiting", "starting") else "down",
+                           "detail": fs["detail"], "latency_ms": fs["latency_ms"]} if ctl.forecast.enabled else \
+        {"status": "healthy", "detail": "switched off in settings"}
+    ws = ctl.summaries.status
+    comps["ai_summaries"] = {"status": "healthy" if ctl.summaries.enabled() and ws["state"] != "failing" else "degraded",
+                             "detail": None if ctl.summaries.enabled() and ws["state"] != "failing" else
+                             (ws["detail"] or "no Groq API key; rule-based summaries in use")}
     if not ctl.intel_enabled:
         comps["prediction_service"] = {"status": "down", "detail": "disabled by operator; threshold fallback active"}
     else:
@@ -261,10 +305,21 @@ def prometheus_metrics():
 
 
 # ---- operator actions -----------------------------------------------------------------------------
-@app.post("/api/recommendations/{card_id}/approve")
-def approve(card_id: str):
+class SeenAllocation(BaseModel):
+    route_id: str = Field(min_length=1, max_length=64)
+    liters: float = Field(gt=0, le=100000)
+
+
+class ApproveIn(BaseModel):
+    allocations: list[SeenAllocation] = Field(min_length=1, max_length=12)
+
+
+@app.post("/api/recommendations/{card_id}/approve", dependencies=[Depends(operator)])
+def approve(card_id: str, body: ApproveIn):
     try:
-        sent = ctl.approve(card_id)
+        sent = ctl.approve(card_id, [a.model_dump() for a in body.allocations])
+    except PlanChanged as e:
+        raise HTTPException(409, str(e)) from e
     except PermissionError as e:
         raise HTTPException(409, str(e)) from e
     except KeyError:
@@ -274,7 +329,7 @@ def approve(card_id: str):
     return {"liters_accepted": sent}
 
 
-@app.post("/api/recommendations/{card_id}/reject")
+@app.post("/api/recommendations/{card_id}/reject", dependencies=[Depends(operator)])
 def reject(card_id: str):
     try:
         ctl.reject(card_id)
@@ -283,7 +338,7 @@ def reject(card_id: str):
     return {"rejected": card_id}
 
 
-@app.post("/api/allocations/{allocation_id}/cancel")
+@app.post("/api/allocations/{allocation_id}/cancel", dependencies=[Depends(operator)])
 def cancel(allocation_id: int):
     with ctl.lock:
         try:

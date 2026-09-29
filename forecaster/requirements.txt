@@ -1,0 +1,7 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+chronos-forecasting
+pandas
+huggingface-hub
+fastapi==0.141.1
+uvicorn==0.54.0

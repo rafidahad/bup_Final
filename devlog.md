@@ -195,6 +195,15 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 
 ## Log
 
+### 2026-09-29 — AI phase execution (P0, P2, P3, P5, P6 in progress)
+- **P0 done:** LP rejects incomplete/invalid demand overrides; station outage = demand unmet, stock frozen (projection + LP, POSTs blocked only during the outage window); approval must match what the operator saw (409 otherwise); operator token on approve/reject/cancel; intent journal moved to the durable data volume; app restart continues the run when the simulator tick shows continuity and reconciles unknown shipments by idempotency key (never re-sent); keys carry a boot id.
+- **C11 verified** on a throwaway simulator: hour factor is taken at the tick's own start hour (mean error 5.2%, max 12%; ±1 tick shift gives up to 249% error at hour boundaries). Noise looks uniform ±10% (σ ≈ 5.7%), so the formula is the true mean demand: a forecaster cannot beat it on average.
+- **P2:** `forecaster/` service (FastAPI + Chronos-2-Small, CPU, pinned revision `ddec0131…`, weights downloaded once into the `models` volume, loaded once). First image build failed on a pip read timeout for the 196 MB torch wheel; now the wheel is downloaded on the host with resume (`forecaster/wheels/`, git-ignored) and installed from there.
+- **P3:** `fuelops/forecast.py` background client (never under the controller lock), multiplier-normalised context (history multiplier from snapshots or rebuilt from public spike events), future multiplier applied once, strict bundle validation, live scoring vs the formula (MAPE, 10–90% coverage), promotion gate reported (planner keeps the formula).
+- **P5:** `fuelops/summary.py` incident cases (events, simulator outage, smart planning off) with versions and bounded evidence packets; background worker, ≤ 6 calls/min, strict JSON schema, evidence-id check, template fallback. **Owner correction: provider is Groq, not xAI Grok** → Groq chat completions, `openai/gpt-oss-120b`.
+- **P6:** Home "Demand forecast" panel (sold, formula, AI range and middle line, accuracy sentence); System "Incident summaries" (AI or rule-based, reason shown) and health rows "AI forecaster (Chronos)", "AI summaries (Groq)".
+- Tests: 22 passing (LP override, outage, approval, restart continuity, 6 summary tests with a mocked Groq endpoint).
+
 ### 2026-09-29 — Plan Revision 5 (AI/ML phase) drafted, awaiting approval
 - Reviewed the owner-supplied AI/ML guideline (Chronos-2-Small forecasts, existing LP, Grok incident summaries). Verified externally: model card (28M params, Apache-2.0, predict_df with quantiles), grok-4.7 availability and prices, Responses API structured output. Verified in code: all nine correctness gaps it names are real.
 - **Approved** as written; < 12 h left → P0, P2, P3, P5 + minimal P6/P7; P4 skipped; P1 reduced. Owner will add XAI_API_KEY to .env; downloads approved.

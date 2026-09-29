@@ -118,3 +118,23 @@ export function simClock(tick: number | null | undefined, tickMinutes = 15) {
 }
 export const pretty = (id: string) => id.replace(/^(station|depot|route|region)-/, "").split("-").map(w => w[0].toUpperCase() + w.slice(1)).join(" → ")
 export const fuelName = (f: string) => f[0] + f.slice(1).toLowerCase()
+
+export interface ForecastPoint { tick: number; q10: number; q50: number; q90: number }
+export interface ForecastSeries {
+  station_id: string; fuel: Fuel
+  observed: { tick: number; liters: number }[]
+  formula: { tick: number; liters: number }[]
+  chronos: ForecastPoint[] | null
+}
+export interface Forecasts {
+  tick: number; tick_minutes: number; planner_uses: string
+  status: { state: string; detail: string | null; latency_ms: number | null }
+  evaluation: { points: number; chronos_mape: number | null; formula_mape: number | null; coverage_10_90: number | null; promoted: boolean; verdict: string }
+  bundle: { cutoff: number; model: string; revision: string; service_ms: number } | null
+  series: ForecastSeries[]
+}
+export interface CaseSummary {
+  case_id: string; version: number; source: "groq" | "template"; title: string; summary: string
+  evidence_ids: string[]; uncertainties: string[]; next_checks: string[]; reason: string | null
+  model: string; generated_at: number
+}

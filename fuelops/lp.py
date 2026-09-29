@@ -7,13 +7,14 @@ Timing follows the probes (devlog "Simulator semantics"), for offset k = tick v+
 Greedy service without binaries (plan §9.4): unmet at offset k weighs 1 + eps*(H-k), strictly
 decreasing, and nothing rewards stock held at the horizon end.
 """
+import math
 import time
 
 import numpy as np
 from scipy.optimize import linprog
 from scipy.sparse import coo_matrix
 
-from .projection import nominal
+from .projection import closed_ticks, nominal
 from .sim import FUELS
 
 
@@ -67,12 +68,13 @@ def solve(snap, horizon=96, demand=None, stress=1.0, weights="decreasing",
     # shipments
     x = {}
     for r in routes:
-        usable = r["status"] == "AVAILABLE" and snap["stations"][r["destination_station_id"]]["status"] == "OPEN"
+        road_open = r["status"] == "AVAILABLE"
+        st_closed = closed_ticks(snap, r["destination_station_id"])  # the server rejects POSTs while closed
         for f in FUELS:
             for k in range(H):
-                # ponytail: a disrupted route / closed station is assumed closed for the whole horizon until M3 reads event end ticks
-                x[r["id"], f, k] = V.add(hi=None if usable and k >= earliest else 0.0,
-                                         cost=c_tx * r["transit_ticks"])
+                # ponytail: a disrupted road is assumed closed for the whole horizon (end ticks not modelled yet)
+                ok = road_open and k >= earliest and not st_closed(v + k)
+                x[r["id"], f, k] = V.add(hi=None if ok else 0.0, cost=c_tx * r["transit_ticks"])
 
     # depots
     created_now = {d: 0.0 for d in snap["depots"]}
@@ -109,14 +111,20 @@ def solve(snap, horizon=96, demand=None, stress=1.0, weights="decreasing",
             for eta, q in snap["incoming"].get((sid, f), ()):
                 existing[eta - v] = existing.get(eta - v, 0.0) + q
             cap = st["capacity"][f]
+            closed = closed_ticks(snap, sid)
             I = [V.add(lo=st["inventory"][f], hi=st["inventory"][f])]
             for k in range(H):
                 t = v + k
-                q = demand.get((sid, f, t), 0.0) if demand is not None else \
-                    nominal(st, f, t, region[st["region_id"]], tm, stress)
+                if demand is not None:
+                    q = demand.get((sid, f, t))
+                    if q is None or not math.isfinite(q) or q < 0:  # a missing key must never mean 0 L demand
+                        raise ValueError(f"demand override incomplete or invalid at {(sid, f, t)}: {q!r}")
+                else:
+                    q = nominal({**st, "status": "OPEN"}, f, t, region[st["region_id"]], tm, stress)
                 total_demand += q
                 w = 1.0 if weights == "flat" else 1.0 + eps * (H - k)
-                y, u, over = V.add(hi=q), V.add(cost=w), V.add(cost=c_over)
+                # C09: during an outage nothing is sold (y = 0), the demand is unmet, stock stays frozen
+                y, u, over = V.add(hi=0.0 if closed(t) else q), V.add(cost=w), V.add(cost=c_over)
                 I.append(V.add(hi=cap))
                 if buffer_ticks:
                     b = V.add(cost=c_buf)  # shortfall below the buffer after serving tick k

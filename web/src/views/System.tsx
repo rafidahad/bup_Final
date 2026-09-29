@@ -8,7 +8,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import { type Health, type Incident, type Status, api, getToken, setToken, usePoll } from "@/lib/api"
+import { type CaseSummary, type Health, type Incident, type Status, api, getToken, setToken, usePoll } from "@/lib/api"
 import { clock, stationName } from "@/lib/text"
 import { cn } from "@/lib/utils"
 import { Loading, Panel } from "./parts"
@@ -19,6 +19,8 @@ const PARTS: Record<string, [string, string]> = {
   simulator: ["Fuel simulator", "The fuel network we operate"],
   prediction_service: ["Forecasting", "Predicts when tanks run out"],
   decision_engine: ["Planner", "Works out what to send where"],
+  forecaster: ["AI forecaster (Chronos)", "Predicts demand with a pretrained model"],
+  ai_summaries: ["AI summaries (Groq)", "Writes short incident explanations"],
 }
 export const PLANNERS: Record<string, string> = {
   "lp-buffer": "Smart plan with safety stock (recommended)",
@@ -61,6 +63,8 @@ export function System({ status, onChanged }: { status: Status | null; onChanged
           })}</ul>
         </Panel>
 
+        <IncidentSummaries />
+
         <Panel title="What happened recently">
           {!events?.length
             ? <p className="px-5 py-8 text-center text-base text-muted-foreground">Nothing has happened yet.</p>
@@ -80,6 +84,32 @@ export function System({ status, onChanged }: { status: Status | null; onChanged
         <TestTools status={status} onChanged={onChanged} />
       </div>
     </div>
+  )
+}
+
+function IncidentSummaries() {
+  const { data } = usePoll<{ ai_enabled: boolean; cases: CaseSummary[] }>("/api/cases", 3000)
+  if (!data) return null
+  return (
+    <Panel title="Incident summaries">
+      {!data.cases.length
+        ? <p className="px-5 py-6 text-base text-muted-foreground">No incidents yet. When a road closes, demand surges, or the simulator stops answering, a short explanation appears here.</p>
+        : <ul className="divide-y">{data.cases.map(c => (
+          <li key={`${c.case_id}:${c.version}`} className="space-y-2 px-5 py-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-base font-semibold">{c.title}</h3>
+              <span className={cn("rounded-full px-2.5 py-0.5 text-sm font-medium", c.source === "groq" ? "bg-octane/15 text-octane" : "bg-muted text-muted-foreground")}>
+                {c.source === "groq" ? "AI summary (Groq)" : "Rule-based summary"}
+              </span>
+            </div>
+            <p className="text-base">{c.summary}</p>
+            {c.uncertainties.length > 0 && <p className="text-sm text-muted-foreground"><span className="font-medium">Not known yet: </span>{c.uncertainties.join(" ")}</p>}
+            {c.next_checks.length > 0 && <p className="text-sm text-muted-foreground"><span className="font-medium">Check next: </span>{c.next_checks.join(" ")}</p>}
+            <p className="text-xs text-muted-foreground">
+              Written {new Date(c.generated_at * 1000).toLocaleTimeString()}{c.source === "template" && c.reason ? `; AI not used: ${c.reason}` : ""}. Based on {c.evidence_ids.length} recorded fact{c.evidence_ids.length === 1 ? "" : "s"}.
+            </p>
+          </li>))}</ul>}
+    </Panel>
   )
 }
 

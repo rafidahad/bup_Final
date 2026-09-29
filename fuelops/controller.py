@@ -9,6 +9,7 @@ Observe → Detect → Predict → Decide → Simulate → Act → Monitor → R
 - Recover: read failures keep cached state (degraded), a circuit breaker backs off after repeated
   failures, tick rollback = external reset (C16), intelligence off/failing → threshold fallback.
 """
+import json
 import threading
 import time
 import uuid
@@ -20,17 +21,23 @@ from . import metrics as M
 from . import store
 from .decisions import build_cards
 from .execute import Executor, _pool, snapshot
-from .harness import REPORTS
+from .forecast import ForecastClient
+from .summary import CaseBook, SummaryWorker
 from .intel import GUIDE_NOISE, NoiseModel, detect
 from .policies import POLICIES, threshold
 from .sim import FUELS, Sim, SimError
 
 MODES = ("observe", "manual", "auto")
+INTENTS = store.DB_PATH.parent / "intents"
 ALLOC_STATUS = {"PENDING", "IN_TRANSIT", "ARRIVED", "FAILED", "CANCELLED"}
 BREAKER_AFTER, BREAKER_SECONDS = 5, 2.0
 
 
 class InvalidResponse(Exception):
+    pass
+
+
+class PlanChanged(Exception):
     pass
 
 
@@ -75,19 +82,57 @@ class Controller:
         self.alerts, self.cards, self.last_proposals = [], {}, []
         self.mape = None
         self.sim_metrics, self.ref_snap, self.world_sig = None, None, None
+        self.forecast = ForecastClient()  # one per app, survives runs
+        self.summaries = SummaryWorker()
+        self.cases = CaseBook(self.summaries)
+        try:
+            self.resume = store.get_meta("run")  # {run_id, tick} of the run before this app start
+        except Exception:  # noqa: BLE001
+            self.resume = None
         self._new_run("start")
 
     # ---- run lifecycle ----------------------------------------------------------------------------
-    def _new_run(self, reason):
+    def _new_run(self, reason, run_id=None):
         self.policy = _make(self.policy_name)
-        self.run_id = uuid.uuid4().hex[:8]
-        REPORTS.mkdir(exist_ok=True)
-        self.executor = Executor(self.sim, self.run_id, REPORTS / f"{self.run_id}_live_intents.jsonl",
+        self.run_id = run_id or uuid.uuid4().hex[:8]
+        INTENTS.mkdir(parents=True, exist_ok=True)  # durable volume, not reports/ (survives container rebuilds)
+        self.executor = Executor(self.sim, self.run_id, INTENTS / f"{self.run_id}.jsonl",
                                  reserve_incoming=getattr(self.policy, "reserve_incoming", True))
         self.noise = NoiseModel()
+        if hasattr(self, "forecast"):
+            self.forecast.invalidate("simulation restarted")
+            self.forecast.bundles = []
         self.last_tick = self.last_history_tick = self.prev = self.ref_snap = None
         self.cards, self.last_proposals, self.alerts = {}, [], []
         self._incident("run", f"new run {self.run_id} ({reason})")
+
+    def _resume_or_start(self, tick):
+        """After an app restart: same simulator world (tick did not go back) -> continue the run and
+        reconcile shipments whose outcome was unknown; otherwise keep the fresh run."""
+        prev, self.resume = self.resume, None
+        if not prev or tick < prev.get("tick", 0):
+            return
+        self._new_run(f"continued after app restart at tick {tick}", run_id=prev["run_id"])
+        state = {}
+        journal = INTENTS / f"{prev['run_id']}.jsonl"
+        if journal.exists():
+            for line in journal.read_text(encoding="utf-8").splitlines():
+                try:
+                    r = json.loads(line)
+                except ValueError:
+                    continue
+                key = r.get("idempotency_key") or r.get("key")
+                if key:
+                    state[key] = r.get("state")
+        unknown = [k for k, st in state.items() if st in ("SENDING", "UNKNOWN_OUTCOME")]
+        if not unknown:
+            return
+        ledger = {a["idempotency_key"]: a for a in self.sim.allocations()}
+        for k in unknown:
+            a = ledger.get(k)
+            self._incident("reconciled", f"shipment {k}: " + (
+                f"accepted by the simulator (#{a['id']}, {a['status'].lower()})" if a
+                else "never reached the simulator; not re-sent"))
 
     def set_policy(self, name):
         """Switch policy (also the rollback path, PS §20). Caller holds the lock."""
@@ -122,6 +167,8 @@ class Controller:
             M.BREAKER_OPEN.set(0)
             try:
                 tick = self.sim.instance()["tick"]
+                if self.resume is not None:
+                    self._resume_or_start(tick)
                 if self.last_tick is not None and tick < self.last_tick:
                     self._new_run(f"reset detected: tick {self.last_tick} → {tick}")
                 if tick == self.last_tick:
@@ -142,6 +189,7 @@ class Controller:
                     self._incident("degraded", f"simulator unreachable, showing cached state: {str(e)[:160]}")
                 self.degraded = str(e)[:200]
                 M.DEGRADED.set(1)
+                self._update_cases()
                 if self.failures >= BREAKER_AFTER:
                     self.breaker_until = time.time() + BREAKER_SECONDS
                     M.BREAKER_OPEN.set(1)
@@ -155,6 +203,8 @@ class Controller:
                 self._incident("stale_flag", "X-Simulator-Stale seen; data used (C15: bodies are current)")
             self.prev, self.snap, self.snap_wall, self.last_tick = self.snap, snap, time.time(), snap["tick"]
             M.SIM_TICK.set(snap["tick"])
+            if snap["tick"] % 4 == 0:
+                store.set_meta("run", {"run_id": self.run_id, "tick": snap["tick"]})
             if self.sim_metrics is None or snap["tick"] % 4 == 0:
                 try:
                     self.sim_metrics = self.sim.metrics()  # cached for the API: load tests never hit the simulator
@@ -177,10 +227,13 @@ class Controller:
     def _pull_history(self, snap):
         if self.last_history_tick is not None and snap["tick"] - self.last_history_tick < 8:
             return
+        limit = 2000 if self.last_history_tick is None else 200  # first pull after start: as much as allowed
         try:
-            for rows in _pool.map(lambda sid: self.sim.demand_history(sid, 200), list(snap["stations"])):
-                self.noise.add_history(rows, snap)
+            new = []
+            for rows in _pool.map(lambda sid: self.sim.demand_history(sid, limit), list(snap["stations"])):
+                new += self.noise.add_history(rows, snap)
             self.last_history_tick = snap["tick"]
+            self.forecast.score_rows(snap, self.noise, new)
         except (SimError, httpx.TransportError):
             M.SIM_ERRORS.labels("history").inc()
 
@@ -196,6 +249,8 @@ class Controller:
     def _decide(self, snap):
         self.noise.observe_snapshot(snap)
         sig = self._world_signature(snap)
+        if self.world_sig is not None and sig != self.world_sig:
+            self.forecast.invalidate("conditions changed")
         if self.world_sig is not None and sig != self.world_sig and hasattr(self.policy, "invalidate"):
             self.policy.invalidate()
             self._incident("replan", "world changed (event, multiplier, route, station, depot or supply) → re-solving now")
@@ -203,6 +258,7 @@ class Controller:
         if self.intel_enabled:
             self._pull_history(snap)
             stats, self.mape = self.noise.stats(snap)
+            self.forecast.maybe_request(snap, self.noise)
             if self.mape is not None:
                 M.PREDICTION_MAPE.set(self.mape)
             proposals = self.policy(snap)
@@ -240,12 +296,27 @@ class Controller:
         M.OPEN_RECOMMENDATIONS.set(sum(1 for c in self.cards.values() if c["allocations"]))
         confs = [c["confidence"] for c in self.cards.values()]
         M.MEAN_CONFIDENCE.set(sum(confs) / len(confs) if confs else 0)
+        self._update_cases()
         if self.mode == "auto":
             # most urgent first: dispatch budget is shared per depot per tick
             urgent = sorted(self.cards.values(), key=lambda c: (-c["before"]["risk"], c["before"]["stockout_hours"] or 1e9))
             for card in urgent:
                 if card["allocations"] and not card["review_required"]:
                     self._execute_card(snap, card, "auto_approved", "controller")
+
+    def clock(self, tick):
+        tm = self.snap["tick_minutes"] if self.snap else 15
+        mins = tick * tm
+        return f"Day {mins // 1440 + 1}, {mins % 1440 // 60:02d}:{mins % 60:02d}"
+
+    def _update_cases(self):
+        if self.snap is None:
+            return
+        try:
+            self.cases.update(self.snap, self.cards, self.alerts, self.run_id, self.degraded, self.intel_enabled, self.clock)
+        except Exception as e:  # noqa: BLE001 — summaries must never stop operations
+            self.incidents.append({"wall": time.time(), "tick": self.snap["tick"], "kind": "error",
+                                   "detail": f"incident summary bookkeeping failed: {e!r}"[:200]})
 
     @staticmethod
     def _alert_key(a):
@@ -272,17 +343,26 @@ class Controller:
             self._measure_lag(snap["tick"])
         return sent
 
-    def approve(self, card_id, who="operator"):
-        """Operator approval (PS §24). Revalidates against a fresh snapshot before any POST."""
+    def approve(self, card_id, seen, who="operator"):
+        """Operator approval (PS §24) of exactly the shipments the operator saw.
+
+        seen = [{route_id, liters}] from the screen. If the current plan differs materially (other roads,
+        or more than 10% / 250 L different) the approval is refused (PlanChanged -> HTTP 409) instead of
+        executing a plan nobody reviewed. Revalidates against a fresh snapshot before any POST."""
         with self.lock:
             if self.mode == "observe":
                 raise PermissionError("Observe mode: switch to manual or auto to act")
             card = self.cards.get(card_id)
             if card is None or not card["allocations"]:
                 raise KeyError(card_id)
+            now = {a["route_id"]: a["liters"] for a in card["allocations"]}
+            saw = {a["route_id"]: float(a["liters"]) for a in seen}
+            if set(now) != set(saw) or any(abs(now[r] - saw[r]) > max(250.0, 0.1 * saw[r]) for r in saw):
+                raise PlanChanged(f"The plan changed since you looked (now {now}); please review it again")
+            approved = {**card, "allocations": [{**a, "liters": saw[a["route_id"]]} for a in card["allocations"]]}
             snap = snapshot(self.sim)
             validate(snap)
-            return self._execute_card(snap, card, "approved", who)
+            return self._execute_card(snap, approved, "approved", who)
 
     def reject(self, card_id, who="operator"):
         with self.lock:

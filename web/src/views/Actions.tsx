@@ -68,8 +68,11 @@ export function Actions({ status }: { status: Status | null }) {
   )
 }
 
+/** Approve exactly what is on screen; the server refuses (409) if the plan changed meanwhile. */
 function approve(c: Card) {
-  return api<{ liters_accepted: number }>(`/api/recommendations/${encodeURIComponent(c.id)}/approve`, { method: "POST" })
+  return api<{ liters_accepted: number }>(`/api/recommendations/${encodeURIComponent(c.id)}/approve`, {
+    method: "POST", body: JSON.stringify({ allocations: c.allocations.map(a => ({ route_id: a.route_id, liters: a.liters })) }),
+  })
 }
 
 function stuckReason(c: Card) {

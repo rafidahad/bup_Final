@@ -26,3 +26,13 @@ PREDICTION_MAPE = Gauge("fuelops_prediction_mape", "Mean absolute % error of dem
 MEAN_CONFIDENCE = Gauge("fuelops_recommendation_confidence", "Mean confidence of current recommendations")
 SOLVE_SECONDS = Histogram("fuelops_solve_seconds", "Optimizer solve time", buckets=(0.05, 0.1, 0.25, 0.5, 1, 2))
 SHIPPED_LITERS = Counter("fuelops_shipped_liters_total", "Liters accepted by the simulator")
+
+# AI: Chronos forecaster (shadow) and LLM summaries on Groq
+FORECAST_SECONDS = Histogram("fuelops_forecast_seconds", "Chronos forecast round trip",
+                             buckets=(0.1, 0.25, 0.5, 1, 2, 4, 8, 16, 30))
+FORECAST_ERRORS = Counter("fuelops_forecast_errors_total", "Failed or rejected forecasts", ["kind"])
+FORECAST_MAPE = Gauge("fuelops_forecast_mape", "Mean absolute % error vs actual demand", ["model"])
+FORECAST_COVERAGE = Gauge("fuelops_forecast_coverage", "Share of actual demand inside Chronos 10-90% range")
+SUMMARY_CALLS = Counter("fuelops_summary_calls_total", "Incident summary attempts", ["result"])
+SUMMARY_SECONDS = Histogram("fuelops_summary_seconds", "LLM (Groq) summary latency", buckets=(0.5, 1, 2, 4, 8, 16, 30))
+SUMMARY_TOKENS = Counter("fuelops_summary_tokens_total", "LLM (Groq) tokens used", ["kind"])

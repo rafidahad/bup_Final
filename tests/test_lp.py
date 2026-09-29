@@ -73,3 +73,32 @@ def test_buffer_never_withholds_service():
     r = solve(world(station_inv=100.0, route=False), horizon=6, headroom_margin=0, buffer_ticks=16)
     assert r["served_by_k"][0] == pytest.approx(PER_TICK, abs=1e-6)
     assert r["served_by_k"][1] == pytest.approx(100 - PER_TICK, abs=1e-6)
+
+
+def test_incomplete_demand_override_is_rejected():
+    snap = world(station_inv=100.0, route=False)
+    demand = {("s", "DIESEL", 72): 50.0}  # every other key missing
+    with pytest.raises(ValueError, match="incomplete"):
+        solve(snap, horizon=4, demand=demand)
+
+
+def test_outage_sells_nothing_and_keeps_stock():
+    """C09: during a station outage demand is unmet and stock is frozen."""
+    snap = world(station_inv=1000.0, route=False)
+    snap["events"] = [{"id": 1, "type": "station_outage", "status": "ACTIVE", "start_tick": 70, "end_tick": 74,
+                       "parameters": {"station_ids": ["s"]}}]
+    snap["stations"]["s"]["status"] = "OUTAGE"
+    r = solve(snap, horizon=4, headroom_margin=0)
+    assert r["served_by_k"][:2] == pytest.approx([0, 0], abs=1e-6)       # ticks 72, 73 closed
+    assert r["served_by_k"][2] == pytest.approx(PER_TICK, abs=1e-6)       # reopened at tick 74
+
+
+def test_projection_counts_outage_demand_as_unmet():
+    from fuelops.intel import project
+    snap = world(station_inv=5000.0, route=False)
+    snap["events"] = [{"id": 1, "type": "station_outage", "status": "ACTIVE", "start_tick": 70, "end_tick": 76,
+                       "parameters": {"station_ids": ["s"]}}]
+    snap["stations"]["s"]["status"] = "OUTAGE"
+    p = project(snap, "s", "DIESEL", 8)
+    assert p["unmet"] == pytest.approx(4 * PER_TICK, rel=1e-6)  # ticks 72..75 closed, stock untouched
+    assert p["stockout_hours"] is None

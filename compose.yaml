@@ -25,6 +25,11 @@ services:
       FUELOPS_POLICY: ${FUELOPS_POLICY:-lp-buffer}
       FUELOPS_MODE: ${FUELOPS_MODE:-manual}
       FUELOPS_OPERATOR_TOKEN: ${FUELOPS_OPERATOR_TOKEN:-}
+      FORECAST_ENABLED: ${FORECAST_ENABLED:-true}
+      FORECAST_URL: http://forecaster:8200
+      SUMMARIES_ENABLED: ${SUMMARIES_ENABLED:-true}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
     ports:
       - "127.0.0.1:${APP_PORT:-8100}:8100"
     volumes:
@@ -32,6 +37,16 @@ services:
     depends_on:
       simulator-api:
         condition: service_healthy
+    restart: unless-stopped
+
+  forecaster:
+    # Chronos-2-Small (pretrained, CPU). First start downloads the pinned weights into the models volume.
+    build: ./forecaster
+    image: fuelops-forecaster:${FUELOPS_VERSION:-dev}
+    volumes:
+      - models:/models
+    ports:
+      - "127.0.0.1:${FORECAST_PORT:-8200}:8200"
     restart: unless-stopped
 
   prometheus:
@@ -62,3 +77,4 @@ services:
 
 volumes:
   fuelops-data:
+  models:

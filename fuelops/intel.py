@@ -8,7 +8,7 @@ No trained model. Stockout risk uses a normal approximation of cumulative demand
 import math
 from collections import defaultdict
 
-from .projection import nominal
+from .projection import closed_ticks, nominal
 from .sim import FUELS
 
 GUIDE_NOISE = {"urban_high": 0.10, "industrial": 0.08, "highway": 0.12, "regional": 0.10}  # prior, guide §8.5
@@ -33,6 +33,7 @@ class NoiseModel:
         self.mult = {}   # (station, tick) -> demand_multiplier seen in a snapshot
 
     def observe_snapshot(self, snap):
+        self.events, self.station_meta = snap["events"], snap["stations"]
         for sid, st in snap["stations"].items():
             self.mult[(sid, snap["tick"])] = st["demand_multiplier"]
 
@@ -40,13 +41,27 @@ class NoiseModel:
         for t in range(tick, max(tick - 64, -1), -1):
             if (sid, t) in self.mult:
                 return self.mult[(sid, t)]
-        return None
+        # Before this app was watching: rebuild from public demand_spike events (C12: multipliers multiply).
+        st = getattr(self, "station_meta", {}).get(sid)
+        if st is None:
+            return None
+        m = 1.0
+        for e in getattr(self, "events", ()):
+            p = e["parameters"]
+            if e["type"] == "demand_spike" and e["start_tick"] <= tick < e["end_tick"] and (
+                    (not p.get("station_ids") and not p.get("region_ids")) or sid in p.get("station_ids", [])
+                    or st["region_id"] in p.get("region_ids", [])):
+                m *= float(p.get("multiplier", 1.5))
+        return m
 
     def add_history(self, rows, snap, keep_ticks=WINDOW):
+        """Adds rows; returns the new ones as (station, fuel, tick, demand)."""
         region = {r["id"]: r["demand_factor"] for r in snap["regions"]}
+        new = []
         for h in rows:
             if h["id"] in self.rows:
                 continue
+            new.append((h["station_id"], h["fuel_type"], h["tick"], h["demand_liters"]))
             self.rows[h["id"]] = (h["station_id"], h["fuel_type"], h["tick"], h["demand_liters"])
             st, m = snap["stations"].get(h["station_id"]), self._mult_at(h["station_id"], h["tick"])
             if st is None or m is None:
@@ -59,6 +74,7 @@ class NoiseModel:
         self.rows = {k: r for k, r in self.rows.items() if r[2] > cutoff}
         self.resid = {k: r for k, r in self.resid.items() if r[1] > cutoff}
         self.mult = {k: m for k, m in self.mult.items() if k[1] > cutoff - 64}
+        return new
 
     def stats(self, snap=None):
         """{profile: (sigma, n)} plus the mean absolute % error of the projection."""
@@ -92,12 +108,16 @@ def project(snap, station_id, fuel, horizon, extra=(), sigma=0.1):
     for eta, q in extra:
         arrivals[eta] += q
     stock, cap = st["inventory"][fuel], st["capacity"][fuel]
+    closed = closed_ticks(snap, station_id)
     avail, cum_mu, cum_var, risk, stockout_k, unmet = stock, 0.0, 0.0, 0.0, None, 0.0
     for k in range(horizon):
         t = v + k
         stock = min(stock + arrivals.get(t, 0.0), cap)
         avail = min(avail + arrivals.get(t, 0.0), cap + cum_mu)  # total fuel usable up to t
-        q = nominal(st, fuel, t, region, tm) if st["status"] == "OPEN" else 0.0
+        q = nominal({**st, "status": "OPEN"}, fuel, t, region, tm)
+        if closed(t):  # C09: customers still come, nothing is sold, stock stays as it is
+            unmet += q
+            continue
         cum_mu += q
         cum_var += (sigma * q) ** 2
         if cum_var > 0:

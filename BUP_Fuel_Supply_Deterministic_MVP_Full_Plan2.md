@@ -181,6 +181,8 @@ Milestones 0–2 are done (devlog). Remaining work, in priority order:
 
 ## Revision 5 — AI/ML phase implementation plan (awaiting owner approval)
 
+> **Correction (owner, 29 Sep 2026): the LLM provider is Groq (groq.com), not xAI Grok.** Summaries call Groq's OpenAI-compatible `POST https://api.groq.com/openai/v1/chat/completions` with `response_format` `json_schema` `strict: true` (verified on Groq docs: strict mode supports `openai/gpt-oss-120b`, `openai/gpt-oss-20b`; all fields required, `additionalProperties: false`). Default model `openai/gpt-oss-120b` (production, $0.15 / $0.60 per million tokens → ≈ $0.0006 per summary). Settings: `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_BASE_URL`, `SUMMARIES_ENABLED`. Everywhere below that says Grok/xAI, read Groq.
+>
 > **Approved 29 Sep 2026 as written.** Time left < 12 h → cut: **P0, P2, P3, P5**, minimal P6 (forecast chart on Home, AI summaries on System, health rows) and minimal P7 (metrics, tests with fakes, README/demo update). **P4 skipped** (Chronos drives the LP only if promoted later). **P1 reduced**: history stays in memory with a 2,000-row sync per station at start. Owner provides `XAI_API_KEY` in `.env`; downloads approved.
 
 Source: the owner-supplied "Full AI/ML Implementation Guideline" (Chronos-2-Small forecasts, existing LP, Grok incident summaries, human-reviewed proposals). This revision reviews that guideline against the current repository (commit `4ec7eaa`), Revision 4, and the earlier ML-layer review, and turns it into one executable plan. **Nothing in this revision is implemented yet.** The pasted guideline arrived truncated after its section 11 "Phase 2"; its later phases are reconstructed here from its sections 1–10.

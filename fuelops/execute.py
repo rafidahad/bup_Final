@@ -11,6 +11,7 @@ Rules baked in from probes (devlog "Simulator semantics"):
 import json
 import math
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
@@ -72,6 +73,7 @@ class Executor:
         The LP models arrival-time clipping itself, so it only needs the server's per-request rule."""
         self.sim, self.run_id, self.reserve_incoming = sim, run_id, reserve_incoming
         self.log = open(log_path, "a", encoding="utf-8")
+        self.boot = uuid.uuid4().hex[:4]  # a continued run after an app restart must never reuse a key
         self.seq = 0
         self.stats = {"sent": 0, "accepted": 0, "rejected": {}, "liters": 0.0}
 
@@ -116,7 +118,7 @@ class Executor:
 
     def _post(self, tick, depot, station, route, fuel, qty):
         self.seq += 1
-        key = f"{self.run_id}:{tick}:{self.seq}"
+        key = f"{self.run_id}:{self.boot}:{tick}:{self.seq}"
         body = dict(idempotency_key=key, source_depot_id=depot, destination_station_id=station,
                     route_id=route, fuel_type=fuel, quantity=qty)
         self.log.write(json.dumps({"tick": tick, "state": "SENDING", **body}) + "\n")

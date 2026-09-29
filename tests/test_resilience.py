@@ -119,3 +119,34 @@ def test_tick_rollback_starts_a_new_run():
     ctl.cycle()
     assert ctl.run_id != first
     assert any("reset detected" in i["detail"] for i in ctl.incidents)
+
+
+def test_approval_of_a_changed_plan_is_refused():
+    from fuelops.controller import PlanChanged
+    sim = FakeSim()
+    ctl = _ctl(sim, mode="manual")
+    ctl.cycle()
+    card = ctl.cards["s:DIESEL"]
+    seen = [{"route_id": a["route_id"], "liters": a["liters"] * 3} for a in card["allocations"]]  # stale screen
+    with pytest.raises(PlanChanged):
+        ctl.approve("s:DIESEL", seen)
+    assert sim.posts == []
+    ok = [{"route_id": a["route_id"], "liters": a["liters"]} for a in card["allocations"]]
+    assert ctl.approve("s:DIESEL", ok) > 0
+
+
+def test_app_restart_continues_the_run_and_reconciles_unknown_shipments():
+    import json
+    from fuelops import controller as C
+    sim = FakeSim()
+    store.set_meta("run", {"run_id": "run42", "tick": 5})
+    C.INTENTS.mkdir(parents=True, exist_ok=True)
+    (C.INTENTS / "run42.jsonl").write_text(json.dumps({"idempotency_key": "run42:ab:5:1", "state": "SENDING"}) + "\n")
+    sim.world["allocations"] = [{"id": 7, "idempotency_key": "run42:ab:5:1", "status": "IN_TRANSIT", "source_depot_id": "d",
+                                 "destination_station_id": "s", "route_id": "rt", "fuel_type": "DIESEL", "quantity": 100.0,
+                                 "created_tick": 5, "departure_tick": 5, "expected_arrival_tick": 7,
+                                 "actual_arrival_tick": None, "failure_reason": None}]
+    ctl = _ctl(sim, mode="observe")
+    ctl.cycle()
+    assert ctl.run_id == "run42"
+    assert any(i["kind"] == "reconciled" and "accepted" in i["detail"] for i in ctl.incidents)

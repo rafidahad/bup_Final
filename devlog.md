@@ -101,7 +101,7 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 
 ## Decisions
 
-- 2026-09-29 — Grafana host port 3300 (was 3000) because Dokploy's panel uses 3000; `GF_SERVER_ROOT_URL` from `GRAFANA_ROOT_URL`. Subdomains: `tae` (app), `tae-grafana`, `dokploy` (panel). Production mode `auto`.
+- 2026-09-29 — Grafana host port 3300 (was 3000) because Dokploy's panel uses 3000; `GF_SERVER_ROOT_URL` from `GRAFANA_ROOT_URL`. Subdomains: `tae` (app), `tae-grafana`, `dokploy` (panel). Production mode `auto`. No operator token (owner: open to everyone for the hackathon).
 - 2026-09-29 — `lp-buffer` = 48 h horizon + 8 h buffer (was 24 h + 4 h): 64% less unmet over 17 crisis recipes, same 7-day result (see Results).
 - 2026-09-29 — Owner answered D1–D4 (plan R4.3); < 24 h to judging → 24-hour cut order.
 
@@ -235,6 +235,10 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 
 ## Log
 
+### 2026-09-29 — Live on Dokploy; Grafana dashboard mount fix
+- Live: https://tae.rafidahad.me (health: all components healthy), https://tae-grafana.rafidahad.me (200). Dokploy Compose Path set to `./compose.yaml` in the UI (file not renamed). Grafana domain container port = 3000 (3300 is only the host port).
+- Dokploy Grafana log: `readdirent /var/lib/grafana/dashboards: no such file or directory` every 10 s → dashboard missing. The bind mount sat inside the image's `/var/lib/grafana` data volume. Moved to `/etc/grafana/dashboards` (compose mount, home-dashboard path, provisioning `path`). Verified locally: no error, dashboard "Fuel Operations" listed and set as home. Not yet verified on Dokploy.
+
 ### 2026-09-29 — LP and card durations in simulated hours
 - `lp-buffer` = `LPPolicy(hours={"horizon": 48, "buffer": 8, "window": 12, "replan": 2})`, converted with the live `tick_minutes` (same 192/32/48/8 ticks at 15 min). Card risk window = 12 h (`decisions.py`).
 - Verified: 11 tests pass; bench at 15 min unchanged (23,783 L).
@@ -259,7 +263,7 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 - Stack verified on Linux: `docker compose up -d --build` → all services healthy; 5/5 tests pass in the image; ~240 MB RAM total.
 - `compose.yaml`: Grafana on host 3300, `GF_SERVER_ROOT_URL`. `.env.example` rewritten (comments on own lines, `GRAFANA_ROOT_URL`). `.env.production` generated with random token/password (gitignored, mode 600). `.gitignore`: `.env.*` except example, `.pytest_cache`, `.kilo/`, editor/OS files. `.dockerignore`: `.env*`.
 - Verified: `docker compose config` OK; Grafana answers on 3300; `git check-ignore` covers `.env`, `.env.production`.
-- **Open before going public:** approve/reject/cancel endpoints (`fuelops/api.py` L264/277/286) have no operator-token guard; Dokploy deploy job (`/api/compose.deploy` after CI passes) not added.
+- Owner decision: **no operator token for the hackathon** — the public URL is open to everyone, keep it simple. `FUELOPS_OPERATOR_TOKEN` left empty. Dokploy deploy job not added.
 
 ### 2026-09-29 — `lp-buffer` default changed to 48 h horizon, 8 h buffer
 - Goal: best automated score on an unknown image (other seed / events). Ran the crisis suite plus 6 hold-out recipes for threshold and four LP settings (89 stepped runs) and a live check; results in **Crisis comparison and horizon/buffer sweep** above.

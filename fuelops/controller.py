@@ -77,7 +77,7 @@ class Controller:
         self.degraded = None
         self.failures, self.breaker_until = 0, 0.0
         self.cycles, self.last_tick, self.last_history_tick = 0, None, None
-        self.lags = deque(maxlen=8)
+        self.lags, self.lag_tick = deque(maxlen=8), None
         self.intel_enabled, self.source = True, policy
         self.alerts, self.cards, self.last_proposals = [], {}, []
         self.mape = None
@@ -225,7 +225,8 @@ class Controller:
             return True
 
     def _pull_history(self, snap):
-        if self.last_history_tick is not None and snap["tick"] - self.last_history_tick < 8:
+        # every 32 ticks: 200 rows per station cover ~66 ticks, and each pull costs a round trip per station
+        if self.last_history_tick is not None and snap["tick"] - self.last_history_tick < 32:
             return
         limit = 2000 if self.last_history_tick is None else 200  # first pull after start: as much as allowed
         try:
@@ -376,13 +377,18 @@ class Controller:
 
     def _measure_lag(self, snap_tick):
         """Plan shipments no earlier than they can really be submitted (plan §9.5 execution window)."""
+        if snap_tick == self.lag_tick:
+            return  # one health read per cycle, not per card (each read waits behind simulator steps)
+        self.lag_tick = snap_tick
         try:
             now = self.sim.health()["simulation"]["tick"]  # fault-exempt
         except httpx.TransportError:
             return
         self.lags.append(now - snap_tick)
         if hasattr(self.policy, "exec_delay"):
-            self.policy.exec_delay = min(16, max(self.lags) + 1)
+            # cap 64, not 16: an externally stepped simulator was measured at 29–54 ticks of lag
+            self.policy.exec_delay = min(64, max(self.lags) + 1)
+        self.executor.lookahead = max(1, max(self.lags) + 1)  # don't POST onto a road that closes before it lands
 
     # ---- thread -----------------------------------------------------------------------------------
     def run_forever(self, stop, poll=0.02):

@@ -235,6 +235,11 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 
 ## Log
 
+### 2026-09-29 — Controller keeps up when the simulator is stepped externally
+- Test (sim-d, 480 external `/admin/step` calls, auto mode, lp-buffer): at 50/125/250 ms between steps 0 L unmet; back-to-back (~19 ms/step) lost 4–5.5k L because the lag estimate was capped at 16 ticks (measured 29–54) and each cycle made one health read per card and a history pull every 8 ticks.
+- `controller.py`: lag cap 64, one health read per cycle, history pull every 32 ticks (200 rows/station still cover ~66 ticks); executor `lookahead` = measured lag so no POST lands on a road that closes before it departs (C18).
+- Verified: back-to-back stepping → **0 L** (baseline and h5, was 5,506 / 3,858 L); 50 ms → 0 L; 25 tests pass. Single runs.
+
 ### 2026-09-29 — Reset button in the top bar
 - `web/src/App.tsx`: "Reset" next to Start/Pause, shown only when paused and past Day 1 00:00; confirmation dialog (same text as System → Test tools), then `POST /api/lab/control {"action":"reset"}`.
 - Verified in the browser on the local stack: step to 00:15 → Reset → confirm → Day 1 00:00, paused, "not started" banner, Reset hidden. `npm run build` passes.

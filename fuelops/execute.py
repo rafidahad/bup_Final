@@ -76,6 +76,7 @@ class Executor:
         self.boot = uuid.uuid4().hex[:4]  # a continued run after an app restart must never reuse a key
         self.seq = 0
         self.stats = {"sent": 0, "accepted": 0, "rejected": {}, "liters": 0.0}
+        self.lookahead = 1  # ticks a POST may land after its snapshot; the live controller raises it to the measured lag
 
     def execute(self, snap, wants):
         tick = snap["tick"]
@@ -89,7 +90,7 @@ class Executor:
             for f, cap in st["capacity"].items():
                 room[(sid, f)] = cap - st["inventory"][f] - (incoming_total(snap, sid, f) if self.reserve_incoming else 0)
 
-        blocked = blocked_routes(snap)
+        blocked = blocked_routes(snap, self.lookahead)
         sent = {}  # (route, fuel) -> liters accepted, so callers can carry unsent remainders forward
         for route_id, fuel, liters in wants:
             r = snap["routes"][route_id]

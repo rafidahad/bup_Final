@@ -195,6 +195,11 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 
 ## Log
 
+### 2026-09-29 — Plan Revision 5 (AI/ML phase) drafted, awaiting approval
+- Reviewed the owner-supplied AI/ML guideline (Chronos-2-Small forecasts, existing LP, Grok incident summaries). Verified externally: model card (28M params, Apache-2.0, predict_df with quantiles), grok-4.7 availability and prices, Responses API structured output. Verified in code: all nine correctness gaps it names are real.
+- **Approved** as written; < 12 h left → P0, P2, P3, P5 + minimal P6/P7; P4 skipped; P1 reduced. Owner will add XAI_API_KEY to .env; downloads approved.
+- Plan Revision 5: forecaster as a separate container, shadow mode with a promotion gate against the formula, Grok summaries with template fallback, P0 safety fixes first, ~19 h estimate with a cut order. Not implemented yet.
+
 ### 2026-09-29 — Tank and route visuals restored (owner: "previous visual container UI was better")
 - Home brings back the vertical tank gauges (4 stations in one row on wide screens) and the route map, keeping the plain-language labels: "Empty now" / "8.7 h left" / "12+ h left", "+6,781 L in 30 min", road drive times in minutes ("30 min", "1 h"), "closed", "demand 2.0× normal", short station names.
 - Legend in words: striped = fuel on the way, dashed line = fuel needed for the next 12 hours.

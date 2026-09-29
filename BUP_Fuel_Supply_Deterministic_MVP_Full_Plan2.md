@@ -179,9 +179,105 @@ Milestones 0–2 are done (devlog). Remaining work, in priority order:
 | 13 Fallback / recovery activates | Degraded mode with cached state; threshold fallback |
 | 14 Operations continue | Recovery incident; metrics back to normal |
 
+## Revision 5 — AI/ML phase implementation plan (awaiting owner approval)
+
+> **Approved 29 Sep 2026 as written.** Time left < 12 h → cut: **P0, P2, P3, P5**, minimal P6 (forecast chart on Home, AI summaries on System, health rows) and minimal P7 (metrics, tests with fakes, README/demo update). **P4 skipped** (Chronos drives the LP only if promoted later). **P1 reduced**: history stays in memory with a 2,000-row sync per station at start. Owner provides `XAI_API_KEY` in `.env`; downloads approved.
+
+Source: the owner-supplied "Full AI/ML Implementation Guideline" (Chronos-2-Small forecasts, existing LP, Grok incident summaries, human-reviewed proposals). This revision reviews that guideline against the current repository (commit `4ec7eaa`), Revision 4, and the earlier ML-layer review, and turns it into one executable plan. **Nothing in this revision is implemented yet.** The pasted guideline arrived truncated after its section 11 "Phase 2"; its later phases are reconstructed here from its sections 1–10.
+
+### R5.1 Review of the guideline
+
+**Verified externally (29 Sep 2026):**
+
+| Claim | Result |
+|---|---|
+| `autogluon/chronos-2-small` exists, Apache-2.0, ~28M parameters, `chronos-forecasting` package, `BaseChronosPipeline.from_pretrained` + `predict_df`, quantile output | Confirmed on the model card (27.9M F32 parameters ≈ 112 MB of weights). Minimum context not documented. |
+| `grok-4.7` exists | Confirmed; $2 input / $6 output per million tokens (< 200k context). |
+| Structured output through the Responses API `text.format` with `json_schema`, `strict` | Confirmed; `grok-4.7` supported. |
+
+**Verified against our code — every correctness gap the guideline names is real:**
+
+| Gap | Where | Adopted fix |
+|---|---|---|
+| Missing demand-override key silently becomes 0 L | `lp.py` line 115 `demand.get(..., 0.0)` | LP rejects incomplete, non-finite or negative override maps |
+| Projection sets demand to 0 during a station outage (simulator: demand unmet, stock frozen) | `intel.py` line 100 | Outage demand counts as unmet; stock frozen |
+| LP can serve demand from stock during a known outage | `lp.py` station block | No service while the station is out (public event window) |
+| Approve / reject / cancel are not operator-protected | `api.py` lines 264–286 | Same operator dependency as lab/mode actions |
+| Card id `station:fuel` is reused, so approving an old screen can execute a newer plan | `decisions.py` line 70 | Immutable proposal id + version + plan hash; 409 on mismatch |
+| Intent journal lives in `reports/`, which is not a durable volume | `controller.py` line 85, `compose.yaml` | Journal under `/app/data`; startup reconciliation by idempotency key |
+| Every app start mints a new run id; outstanding intents are never reconciled | `controller.py` line 78 | Continue the run when the simulator tick shows continuity |
+| Incident list is in memory only | `api.py` line 201 | Read incidents and summaries from SQLite |
+| History = 200 rows per station every 8 ticks, memory only | `controller.py` line 181 | Persistent demand history (needed as Chronos context) |
+
+**Out of date in the guideline:** repository path (`D:/Hackathon_final` → `D:/Hackathaon_BUP_Final`), checkpoint (`4b1603e` → `4ec7eaa`), view names (now Home, Actions, History, System), M9 and README (done).
+
+**Changed from the guideline, with reasons:**
+
+| Guideline | This plan | Why |
+|---|---|---|
+| Chronos worker as a separate process sharing SQLite job tables (WAL, leases) | **Separate `forecaster` container** with a small HTTP API (`POST /forecast`, `GET /health`); backend calls it from a background thread | Keeps torch (~1 GB installed) out of the main image and CI; no multi-process SQLite locking; the PS §11 demo "ML model unavailable → fallback" becomes `docker compose stop forecaster` |
+| Durable Grok job table with leases | Background thread in the backend with a bounded queue; results, attempts and failures persisted in SQLite; unfinished jobs re-queued on start | One process only; same guarantees for this scale |
+| Snapshot, simulator-run and per-read metadata tables | Deferred | Not needed for the AI features in < 24 h; current continuity checks remain |
+| Optional SSE, joint-trajectory stockout probability, autotuning | Out of scope | Guideline itself marks them optional |
+
+**Honest expectation.** The simulator's demand is the published formula times ~5% noise (measured projection error 5.0–5.5%). A zero-shot pretrained model will very likely **not** beat the formula on point accuracy. That is why Chronos starts in **shadow mode** and only drives the optimizer if it passes the promotion gate (R5.3 P3). Its lasting value is the forecast with an uncertainty band, which is the clearest evidence of "predictive capability" (PS §7, §14), plus measured prediction error. Reports will state which model won.
+
+**Alignment with earlier decisions.** This is the AI/ML phase that Revision 4 D1 and plan §25 deferred, now approved by the owner. It matches the earlier ML-layer review: a prediction chart with a quantile band, an LLM that only explains, never decides, and a fallback for every AI part. It drops RL and parameter tuning. The LP, executor, validation and retries stay deterministic.
+
+### R5.2 Architecture
+
+```text
+Official simulator ──REST──▶ Backend (FastAPI, one operational writer)
+                               ├─ controller: snapshot, validation, detectors, LP, proposals, executor
+                               ├─ history ingestion ─▶ SQLite (demand history, forecasts, proposals,
+                               │                          incidents, summaries, intents, audit)
+                               ├─ forecast client ──HTTP──▶ forecaster container (Chronos-2-Small, CPU,
+                               │    (background thread)        weights in a named volume, loaded once)
+                               ├─ summary worker ──HTTPS──▶ xAI Grok API (evidence packet only)
+                               └─ /api, /metrics ──▶ web app, Prometheus → Grafana
+```
+
+AI components never write to the simulator. Forecasts feed the LP only in operational mode after promotion. Grok output is text for operators; quantities and approvals stay deterministic and human-reviewed.
+
+### R5.3 Phases, gates and estimates
+
+| # | Phase | Work | Gate | Est. |
+|---|---|---|---|---|
+| P0 | Correctness and safety (non-ML) | LP override validation; outage semantics in projection and LP; proposal id/version/hash with 409 on change; operator token on approve/reject/cancel; durable intent journal and startup reconciliation; C11 probe (demand tick timing) | Unit tests for each; approving a changed plan returns 409 | 3 h |
+| P1 | Durable demand history | SQLite `demand_observations` (dedupe by run + source id), per-tick demand-multiplier log, ingestion continues with intelligence off, explicit gap markers, reset = new epoch | Restart keeps history; no duplicates; gaps visible | 1 h |
+| P2 | Forecaster service | `forecaster/` container (python:3.12-slim, CPU torch, chronos-forecasting, pandas); `scripts/download_models.py` at a pinned revision into a volume + manifest; load once; `POST /forecast` → q10/q50/q90 per station/fuel/absolute tick; backend client with timeout and breaker; ForecastBundle validation (coverage, finite, non-negative, ordered quantiles, age, run, event hash) | Starts offline from saved weights; latency measured; malformed output rejected | 3 h |
+| P3 | Shadow evaluation and promotion | Rolling-origin comparison Chronos vs formula per station/fuel: MAPE, pinball loss, q10–q90 coverage; spike handling by normalising history with the recorded multiplier and applying the known future multiplier once; **promotion rule:** operational only if Chronos MAPE ≤ formula MAPE and 10–90 coverage within 70–95% over at least one simulated day of held-out ticks | Evaluation stored and shown; promotion decision recorded either way | 2 h |
+| P4 | `lp-chronos` planner (conditional) | Complete q50 demand map → existing LP; the same bundle drives projections and cards; card shows forecast source; fallbacks: forecaster down → formula, LP fails → threshold, kill switch → threshold | Policy selectable; falls back cleanly when the forecaster is stopped | 1.5 h |
+| P5 | Grok incident summaries | Incident grouping (kind + entity + event) with version and evidence hash; bounded evidence packet; versioned prompt file; Pydantic schema; Responses API (`store: false`, 20 s timeout, 2 attempts, ≤ 6 calls/min, 1 concurrent); evidence-id and entity checks; factual template fallback; no key → template | Mocked-Grok tests (valid, bad references, 429, timeout, incomplete); one live call when a key is provided | 3 h |
+| P6 | Operator UI (plain language kept) | Home: demand forecast chart per station (observed + q50 + q10–q90 band, source label); Actions: forecast source and "if demand is higher" line; System: AI incident summaries (badge, generated-at, template state); health rows "Forecasting (Chronos)" and "AI summaries (Grok)"; proposal version sent on approval | Verified in the browser; no jargon | 3 h |
+| P7 | Observability, load and evidence | Metrics: forecast latency, age, fallbacks, error vs formula; Grok calls, errors, latency, tokens, estimated cost; Grafana panels; k6 rerun with AI active; README, diagram and demo script updated (PS §22 step 5 = Chronos band, step 11 = stop forecaster → formula fallback, Grok summary of the crisis); CI runs AI tests with fake forecaster and Grok (no torch in CI) | Evidence recorded in devlog; CI green | 2.5 h |
+
+Total ≈ 19 h. **If time is short, cut in this order:** P4 (only matters if Chronos is promoted), the Actions forecast line in P6, the Grafana AI panels, then P1 gap handling. Never cut P0 safety fixes or the fallbacks.
+
+### R5.4 Configuration (backend-only secrets)
+
+`.env.example` gains: `FORECAST_ENABLED`, `FORECAST_MODE=shadow|operational`, `FORECAST_URL=http://forecaster:8200`, `FORECAST_MODEL_ID=autogluon/chronos-2-small`, `FORECAST_MODEL_REVISION`, `FORECAST_CONTEXT_TICKS=288`, `FORECAST_MIN_CONTEXT_TICKS=96`, `FORECAST_HORIZON_TICKS=96`, `FORECAST_REFRESH_TICKS=8`, `GROK_ENABLED`, `XAI_API_KEY` (placeholder), `GROK_MODEL=grok-4.7`, `GROK_BASE_URL=https://api.x.ai/v1`, `GROK_TIMEOUT_SECONDS=20`, `GROK_MAX_ATTEMPTS=2`, `GROK_MAX_CALLS_PER_MINUTE=6`. No `VITE_` variables carry secrets; `.env`, weights, databases and reports stay out of Git.
+
+### R5.5 Downloads, cost and data leaving the machine
+
+- Downloads (need owner permission): CPU PyTorch wheel (~180 MB), chronos-forecasting and pandas (~40 MB), Chronos-2-Small weights (~112 MB) from Hugging Face.
+- Grok: about 2k input + 0.5k output tokens per summary ≈ $0.007 at grok-4.7 prices; a demo day with ~100 summaries ≈ $1. Only simulated incident evidence is sent to xAI; no keys, tokens or databases.
+
+### R5.6 Risks
+
+| Risk | Mitigation |
+|---|---|
+| Chronos worse than the formula | Shadow mode + promotion gate; formula stays operational; reported honestly |
+| Chronos latency at 8 ticks/s | Background thread, bounded queue, max-age check, formula fallback; demo at `SIMULATION_SPEED=1` |
+| Spike semantics misread by the model | Normalise by recorded multiplier; affected station falls back to the formula until validated |
+| Grok hallucination | Strict schema, evidence-id and entity checks, template fallback, facts and numbers from our own fields only |
+| No xAI key or network at judging | Template summaries; everything else offline |
+| Image size and CI time | Torch only in the forecaster image; CI uses fakes |
+
 ### Navigation
 
 - [Revision 4 — official problem statement alignment](#revision-4--alignment-with-the-official-problem-statement)
+- [Revision 5 — AI/ML phase implementation plan](#revision-5--aiml-phase-implementation-plan-awaiting-owner-approval)
 - [Product scope](#3-product-scope-and-definition-of-a-full-mvp)
 - [Documentation and simulator contract checks](#4-phase-0-documentation-discovery-and-contract-validation)
 - [Architecture and stack](#6-recommended-architecture-and-technology)

@@ -8,7 +8,10 @@ export interface Status {
   intelligence_enabled: boolean; degraded: string | null; tick: number | null; sim_status: string | null
   tick_minutes: number | null; snapshot_age_s: number | null; cycles: number; token_required: boolean
 }
-export interface FuelLevel { fuel: Fuel; inventory: number; capacity: number; incoming?: number; demand_per_day?: number }
+export interface FuelLevel {
+  fuel: Fuel; inventory: number; capacity: number; incoming?: number; demand_per_day?: number
+  next_arrival_tick?: number | null; stockout_hours?: number | null; risk?: number
+}
 export interface Station { id: string; name: string; status: string; region_id: string; demand_profile: string; demand_multiplier: number; fuels: FuelLevel[] }
 export interface Depot { id: string; name: string; status: string; region_id: string; dispatch_capacity_per_tick: number; fuels: FuelLevel[] }
 export interface Route { id: string; source_depot_id: string; destination_station_id: string; transit_ticks: number; max_shipment: number; status: string }
@@ -36,7 +39,7 @@ export interface Card {
 export interface Alert { kind: string; severity: string; detail: string; station_id?: string; fuel?: Fuel; depot_id?: string; event_id?: number }
 export interface Incident { wall: number; tick: number | null; kind: string; detail: string }
 export interface Decision {
-  id: number; wall: number; tick: number; station_id: string; fuel: Fuel; status: string; decided_by: string; source: string
+  id: number; wall: number; run_id: string; tick: number; station_id: string; fuel: Fuel; status: string; decided_by: string; source: string
   confidence: number; risk_before: number; risk_after: number | null; liters: number; outcome: { liters_accepted: number } | null
 }
 export interface Health {

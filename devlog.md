@@ -195,6 +195,13 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 
 ## Log
 
+### 2026-09-29 — Operator UI simplified for end users (owner feedback: "too complex")
+- 5 views → 4: **Home** (one-line status, problems in plain sentences, stations with OK/Low/Critical and "runs out in 3.2 hours", "+2,000 L arriving in 30 min", depots, roads as a list), **Actions** (cards phrased as instructions "Send 3,488 L octane to Mirpur", Why, If sent, Send / Skip, Send all; technical detail under "More details"), **History** (decisions and shipments as sentences), **System** (health in plain words, readable event timeline, Settings with friendly planner names, demo tools collapsed under "Test tools").
+- Top bar: simulation time with Start/Pause, and "Sending fuel: View only / I approve / Automatic". Planner moved to Settings; `lp-tick` and `none` hidden.
+- No internal jargon on screen (ticks, lp, z-scores, raw event parameters, route ids); body text 16 px, darker secondary text.
+- Backend: overview now includes per-fuel stockout time, risk, and next arrival (same projection as recommendations); single simulator steps no longer flood the incident log.
+- Verified in the browser (text and screenshots) against the live stack; build passes.
+
 ### 2026-09-29 — Final verification and two execution fixes
 - Clean clone → `docker compose -p verify up -d --build` on alternate ports: all 5 components healthy, simulator steps, metrics exposed, web app and Grafana HTTP 200; torn down.
 - Crisis replay (Karnaphuli spike ×2.2 + Patiya→Karnaphuli disrupted) exposed octane starvation: a batch exceeded the 12,000 L/tick depot dispatch budget and the unsent remainder was dropped. Fix: executor returns liters sent per route/fuel, the controller carries remainders to the next tick, and auto mode executes the most urgent cards first. Replay: all three fuels rerouted via Gazipur (octane 3,654 L), 0 FAILED, 100% served.

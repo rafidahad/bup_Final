@@ -25,6 +25,7 @@ from . import metrics as M
 from . import store
 from .controller import MODES, Controller
 from .policies import POLICIES
+from .intel import project
 from .projection import nominal
 from .sim import FUELS, SimError
 
@@ -134,8 +135,13 @@ def _overview():
         for f in FUELS:
             d = sum(nominal(st, f, t, region[st["region_id"]]["demand_factor"], tm) for t in range(tick, tick + per_day))
             regional[st["region_id"]]["demand_per_day"] += d
+            arrivals = s["incoming"].get((st["id"], f), ())
+            sigma = ctl.noise.stats()[0].get(st["demand_profile"], (0.1, 0))[0]
+            proj = project(s, st["id"], f, 48, sigma=sigma)  # same 12 h projection the recommendations use
             fuels.append({"fuel": f, "inventory": st["inventory"][f], "capacity": st["capacity"][f],
-                          "incoming": sum(q for _, q in s["incoming"].get((st["id"], f), ())), "demand_per_day": d})
+                          "incoming": sum(q for _, q in arrivals), "demand_per_day": d,
+                          "next_arrival_tick": min((eta for eta, _ in arrivals), default=None),
+                          "stockout_hours": proj["stockout_hours"], "risk": proj["risk"]})
         stations.append({"id": st["id"], "name": st["name"], "status": st["status"], "region_id": st["region_id"],
                          "demand_profile": st["demand_profile"], "demand_multiplier": st["demand_multiplier"], "fuels": fuels})
     depots = [{"id": d["id"], "name": d["name"], "status": d["status"], "region_id": d["region_id"],
@@ -373,7 +379,8 @@ def lab_clear():
 
 @app.post("/api/lab/control", dependencies=[Depends(operator)])
 def lab_control(body: ControlIn):
-    ctl._incident("lab", f"simulator {body.action}")
+    if body.action != "step":  # single steps would flood the timeline
+        ctl._incident("lab", f"simulator {body.action}")
     return _admin(getattr(ctl.sim, body.action))
 
 

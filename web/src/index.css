@@ -80,11 +80,11 @@
     --secondary: #e6ebea;
     --secondary-foreground: #14222c;
     --muted: #e9eeed;
-    --muted-foreground: #53626b;
+    --muted-foreground: #3f4d56;
     --accent: #dfe7e6;
     --accent-foreground: #14222c;
     --destructive: #b3261e;
-    --border: #d3dbda;
+    --border: #cdd6d5;
     --input: #c5cfce;
     --ring: #24507a;
     --chart-1: #24507a;
@@ -149,7 +149,8 @@
     }
 }
 @layer base {
-  body { font-feature-settings: "tnum" 1, "lnum" 1; }
+  html { font-size: 16px; }
+  body { font-feature-settings: "tnum" 1, "lnum" 1; line-height: 1.5; }
   h1, h2, h3 { font-family: var(--font-heading); letter-spacing: -0.005em; }
 }
 @media (prefers-reduced-motion: reduce) {

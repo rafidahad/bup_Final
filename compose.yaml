@@ -1,3 +1,6 @@
+# One command runs everything:  docker compose up -d --build
+# Simulator (official, unchanged) + Fuel Operations app + Prometheus + Grafana.
+# Ports bind to 127.0.0.1 only. Copy .env.example to .env to change settings.
 services:
   simulator-api:
     image: asifmahmoud414/bup-fuel-supply-simulator:1.0.0
@@ -8,3 +11,54 @@ services:
     ports:
       # Host port is configurable: Windows/Hyper-V often reserves 8000.
       - "127.0.0.1:${SIM_PORT:-18000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/v1/health', timeout=3).status == 200 else 1)"]
+      interval: 5s
+      timeout: 4s
+      retries: 10
+
+  fuelops:
+    build: .
+    image: fuelops:${FUELOPS_VERSION:-dev}
+    environment:
+      SIM_URL: http://simulator-api:8000
+      FUELOPS_POLICY: ${FUELOPS_POLICY:-lp-buffer}
+      FUELOPS_MODE: ${FUELOPS_MODE:-manual}
+      FUELOPS_OPERATOR_TOKEN: ${FUELOPS_OPERATOR_TOKEN:-}
+    ports:
+      - "127.0.0.1:${APP_PORT:-8100}:8100"
+    volumes:
+      - fuelops-data:/app/data
+    depends_on:
+      simulator-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      - fuelops
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:12.1.1
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/fuelops.json
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  fuelops-data:

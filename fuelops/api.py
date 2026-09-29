@@ -199,7 +199,8 @@ def health():
                                        "history_rows": len(ctl.noise.rows)}
     age = time.time() - ctl.snap_wall if ctl.snap_wall else None
     solves = getattr(ctl.policy, "log", None) or []
-    engine_ok = ctl.alive() and age is not None and age < 10
+    paused = comps["simulator"].get("state") == "PAUSED"  # a paused clock means idle, not stuck
+    engine_ok = ctl.alive() and age is not None and (age < 10 or paused)
     comps["decision_engine"] = {"status": "healthy" if engine_ok and "fallback" not in ctl.source else
                                 ("degraded" if ctl.alive() else "down"),
                                 "source": ctl.source, "last_cycle_age_s": round(age, 2) if age else None,

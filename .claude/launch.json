@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fuelops",
+      "runtimeExecutable": "D:/Hackathaon_BUP_Final/.venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "uvicorn", "fuelops.api:app", "--port", "8100", "--app-dir", "D:/Hackathaon_BUP_Final"],
+      "port": 8100
+    }
+  ]
+}

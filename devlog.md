@@ -61,7 +61,7 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 | 1 | Working slice: threshold policy, executor, stepped harness | Done |
 | 2 | LP planner + hindsight bound | Done (stepped); live needs safety buffer (D4) |
 | M3 | Decision-support core: detectors, stockout risk, recommendation cards, what-if, approval queue, audit | Done |
-| M4 | Resilience behaviours (PS §11 mappings) | Mostly done: validation+alert, circuit breaker, cached state, kill switch → fallback, confidence gate; demos pending |
+| M4 | Resilience behaviours (PS §11 mappings) | Done (all four mappings demonstrated; 6 resilience tests) |
 | M5 | Operator web app (5 views + lab) | Done (verified in browser against live simulator) |
 | M6 | Observability: Prometheus, Grafana, logs, health | Done (Prometheus scraping, Grafana dashboard provisioned, /api/health, health view) |
 | M7 | DevOps: Dockerfile, full compose, CI | Done locally (compose healthy); CI pushed, first run pending |
@@ -154,6 +154,17 @@ Workload: `ops/k6/load.js`. Scenario "dashboard" = what an operator's browser po
 | 3 | **realistic** (each dashboard polls once a second, 5 decision req/s) | 128 req/s | **0 / 12,933** | **32 ms / 275 ms / 432 ms** | **8 ms / 181 ms / 347 ms** | 113% / 132 MB |
 
 Findings: the limit is CPU in the single backend process (one process by design: one operational writer). Run 1 recomputed demand projections and re-encoded the growing shipment ledger on every request; caching serialized JSON once per tick and capping the ledger at 200 rows doubled throughput. Capacity ≈ 260 req/s ≈ 65 dashboards polling 4 endpoints each second; at realistic load p95 stays under 300 ms. API load never reaches the simulator (metrics and health are cached). Raw summaries and `docker stats` samples: `ops/k6/summary_*.json`, `ops/k6/stats_run*.csv`.
+
+### Resilience demonstrations (PS §11) — against the running compose stack
+
+| PS §11 mapping | How it was triggered | Observed behaviour |
+|---|---|---|
+| ML model unavailable → fallback allocation policy | Lab switch `PUT /api/intelligence {enabled:false}` | Health: prediction service **down**, decision engine **degraded**, source "threshold (fallback: intelligence disabled)"; `fuelops_fallback_activations_total{reason="intelligence_disabled"}` = 1; allocation continues on rules. Test: `test_intelligence_off_falls_back_to_rule_policy_and_keeps_operating`. |
+| Invalid simulator response → reject input + raise alert | Fake simulator returning negative inventory (the official image must not be modified) | Snapshot rejected, never becomes state, incident `invalid_response`, no shipment decided. Tests: `test_invalid_response_is_rejected_and_raises_an_alert`, `test_validate_rejects_unknown_allocation_status`. |
+| Prediction confidence too low → human review | Fresh run (48 history rows) + lab demand spike ×2.5 at Mirpur, auto mode | Immediate replan (incident at tick 17); Mirpur cards carry allocations (e.g. 11,819 L petrol, risk 100% → 0%) but confidence **0.47 < 0.5** → "Needs your review"; **0 automatic shipments to Mirpur** after the spike. Test: `test_low_confidence_during_crisis_requires_review`. |
+| Backend dependency unavailable → retry / cached state / degraded | (a) simulator fault `unavailable` 10 s while running; (b) `docker compose stop simulator-api` 10 s | (a) degraded within 2 s, cached snapshot (tick 35) served, circuit breaker limited reads to 9 attempts, recovered ~1 s after expiry (tick 113). (b) health: simulator **down**, backend healthy, `/api/overview` still HTTP 200 from cache; all components healthy again after restart. |
+
+Bugs found by these demos and fixed: (1) a spike did not trigger a replan until the 8-tick cadence → cards had no allocation; now any change in events, multipliers, route/station/depot status or supply forces an immediate re-solve (plan §9.1). (2) During an injected outage the executor retried every shipment of a batch (~0.75 s each) and the controller froze without flagging degraded; now the batch stops at the first write failure and the controller goes degraded. (3) Fallback wording claimed "all cards need review" while the fallback policy (correctly, per PS §11) keeps allocating; wording fixed.
 
 ## Next up
 

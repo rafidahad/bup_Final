@@ -13,7 +13,7 @@ import { type Incident, type Status, api, getToken, setToken, simClock, usePoll 
 const KIND_TEXT: Record<string, string> = {
   run: "Run", degraded: "Simulator unreachable", recovered: "Recovered", alert: "Detected", fallback: "Fallback",
   invalid_response: "Rejected data", stale_flag: "Stale flag", lab: "Lab", mode: "Mode", policy: "Planner",
-  intelligence: "Intelligence", error: "Error",
+  intelligence: "Intelligence", error: "Error", replan: "Replanned",
 }
 const KIND_COLOR: Record<string, string> = {
   degraded: "text-alarm", invalid_response: "text-alarm", error: "text-alarm", fallback: "text-warn", alert: "text-warn",

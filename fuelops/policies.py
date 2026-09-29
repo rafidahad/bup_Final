@@ -52,6 +52,10 @@ class LPPolicy:
         self.plan, self.solved_at, self.log = None, None, []
         self.exec_delay = 0  # ticks between snapshot and submission; the live controller measures it
 
+    def invalidate(self):
+        """Force a re-solve on the next call (plan §9.1: replan immediately on events)."""
+        self.plan = None
+
     def __call__(self, snap):
         from .lp import solve  # scipy import only when used
         v = snap["tick"]

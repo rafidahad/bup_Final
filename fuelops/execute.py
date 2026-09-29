@@ -119,7 +119,8 @@ class Executor:
         self.log.write(json.dumps({"tick": tick, "state": "SENDING", **body}) + "\n")
         self.log.flush()  # persist before the HTTP call (plan §10.3 staging)
         self.stats["sent"] += 1
-        for attempt in range(4):
+        last_error = None
+        for attempt in range(3):
             try:
                 a = self.sim.allocate(key, depot, station, route, fuel, qty)
                 self._record(key, "CONFIRMED", a["id"])
@@ -128,6 +129,7 @@ class Executor:
                 return True
             except SimError as e:
                 if e.status == 503:  # injected fault: request never processed, same key is safe
+                    last_error = e
                     time.sleep(0.05 * 2 ** attempt)
                     continue
                 self._record(key, "REJECTED", e.code)
@@ -144,9 +146,13 @@ class Executor:
                     self.stats["accepted"] += 1
                     self.stats["liters"] += qty
                     return True
+                last_error = SimError(503, "UNREACHABLE", "simulator did not answer the allocation request")
                 time.sleep(0.05 * 2 ** attempt)
-        self._record(key, "UNKNOWN_OUTCOME", None)
-        return False
+        # The simulator is down: stop this whole batch (no point retrying every other shipment)
+        # and let the controller go degraded. The key and body stay in the intent log.
+        self._record(key, "UNKNOWN_OUTCOME" if isinstance(last_error, SimError) and last_error.code == "UNREACHABLE"
+                     else "NOT_SENT_SIMULATOR_DOWN", None)
+        raise last_error
 
     def _record(self, key, state, detail):
         self.log.write(json.dumps({"key": key, "state": state, "detail": detail}) + "\n")

@@ -74,7 +74,7 @@ class Controller:
         self.intel_enabled, self.source = True, policy
         self.alerts, self.cards, self.last_proposals = [], {}, []
         self.mape = None
-        self.sim_metrics, self.ref_snap = None, None
+        self.sim_metrics, self.ref_snap, self.world_sig = None, None, None
         self._new_run("start")
 
     # ---- run lifecycle ----------------------------------------------------------------------------
@@ -101,7 +101,7 @@ class Controller:
         """Kill switch for the demo: 'ML model unavailable → fallback allocation policy' (PS §11)."""
         self.intel_enabled = enabled
         self.last_proposals, self.cards = [], {}
-        self._incident("intelligence", "enabled" if enabled else "disabled → threshold fallback, all cards need review")
+        self._incident("intelligence", "enabled" if enabled else "disabled → threshold fallback policy takes over allocation")
         if not enabled:
             M.FALLBACKS.labels("intelligence_disabled").inc()
 
@@ -160,7 +160,16 @@ class Controller:
                     self.sim_metrics = self.sim.metrics()  # cached for the API: load tests never hit the simulator
                 except (SimError, httpx.TransportError):
                     pass
-            self._decide(snap)
+            try:
+                self._decide(snap)
+            except (SimError, httpx.TransportError) as e:  # writes failing: simulator went down mid-batch
+                M.SIM_ERRORS.labels("write").inc()
+                self.failures += 1
+                if not self.degraded:
+                    self._incident("degraded", f"shipment requests failing, batch stopped: {str(e)[:150]}")
+                self.degraded = str(e)[:200]
+                M.DEGRADED.set(1)
+                return False
             self.cycles += 1
             M.DECISION_CYCLES.inc()
             return True
@@ -175,8 +184,22 @@ class Controller:
         except (SimError, httpx.TransportError):
             M.SIM_ERRORS.labels("history").inc()
 
+    @staticmethod
+    def _world_signature(snap):
+        """What the plan depends on besides stock: events, multipliers, route/station/depot status, supply."""
+        return (tuple((e["id"], e["status"]) for e in snap["events"]),
+                tuple((s, st["status"], st["demand_multiplier"]) for s, st in sorted(snap["stations"].items())),
+                tuple((r, rt["status"]) for r, rt in sorted(snap["routes"].items())),
+                tuple((d, dep["status"]) for d, dep in sorted(snap["depots"].items())),
+                tuple((x["id"], x["planned_tick"], x["quantity"]) for x in snap["supply"] if x["status"] != "ARRIVED"))
+
     def _decide(self, snap):
         self.noise.observe_snapshot(snap)
+        sig = self._world_signature(snap)
+        if self.world_sig is not None and sig != self.world_sig and hasattr(self.policy, "invalidate"):
+            self.policy.invalidate()
+            self._incident("replan", "world changed (event, multiplier, route, station, depot or supply) → re-solving now")
+        self.world_sig = sig
         if self.intel_enabled:
             self._pull_history(snap)
             stats, self.mape = self.noise.stats(snap)

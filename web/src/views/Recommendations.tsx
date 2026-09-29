@@ -88,7 +88,9 @@ function RecommendationCard({ card: c, mode, tickMinutes, onDone }: { card: Card
           <section>
             <h4 className="text-xs font-semibold text-muted-foreground">Recommendation</h4>
             {c.allocations.length === 0
-              ? <p className="text-sm font-medium text-alarm">No feasible shipment right now{c.alternatives.every(a => !a.usable) ? ": every route to this station is disrupted" : ": depot stock, dispatch capacity or tank space is exhausted"}.</p>
+              ? <p className="text-sm font-medium text-alarm">{c.alternatives.length > 0 && c.alternatives.every(a => !a.usable)
+                  ? "No shipment possible: every route to this station is disrupted."
+                  : "No shipment in the current plan. The planner found nothing it can send here now (depot stock, dispatch capacity, tank space, or fuel needed elsewhere)."}</p>
               : <ul className="space-y-1 text-sm">{c.allocations.map(a => (
                 <li key={a.route_id}>
                   Send <strong>{fmtL(a.liters)}</strong> from {pretty(a.depot_id)} via {pretty(a.route_id)}

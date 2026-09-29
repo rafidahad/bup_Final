@@ -105,7 +105,7 @@ export default function App() {
         {error && !status && <Banner tone="alarm">Backend unreachable: {error}. Retrying every second.</Banner>}
         {error && status && <Banner tone="alarm">Backend not responding. Showing the last known values; retrying.</Banner>}
         {status?.degraded && <Banner tone="warn">Simulator unreachable. Showing data from {Math.round(status.snapshot_age_s ?? 0)} s ago; nothing is sent until it is back.</Banner>}
-        {status && !status.intelligence_enabled && <Banner tone="warn">Prediction and optimizer are off. Recommendations come from fallback rules and all need review.</Banner>}
+        {status && !status.intelligence_enabled && <Banner tone="warn">Prediction and optimizer are off. The fallback rule policy is allocating fuel until they are back.</Banner>}
 
         <main className="px-4 py-6 md:px-8">
           {view === "overview" && <Overview />}

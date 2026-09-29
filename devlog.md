@@ -42,6 +42,12 @@ docker compose up -d                      # simulator on http://localhost:18000 
 .venv/Scripts/python.exe -m fuelops.harness threshold none --ticks 672   # stepped benchmark → reports/
 ```
 
+Regression benchmark (resets every simulator it uses — never point it at the demo/production one): `docker compose --profile bench up -d sim-b sim-c sim-d`, then `docker compose run --rm --no-deps -v "$PWD/reports:/app/reports" fuelops python -m fuelops.bench lp-buffer threshold --sims http://simulator-api:8000,http://sim-b:8000,http://sim-c:8000,http://sim-d:8000 --max-total 23783` (17 recipes × 5 days, ~5 min; exit 1 if `lp-buffer` gets worse). Stop the extras with `docker compose --profile bench stop sim-b sim-c sim-d`.
+
+Full stack: `docker compose up -d --build` → app http://localhost:8100, Grafana http://localhost:3300, Prometheus :9090, simulator :18000 (all 127.0.0.1).
+
+Production (Dokploy on VPS, 2 core / 8 GB, x86_64 required — simulator image is amd64 only): Compose service from this repo, env pasted from `.env.production` (gitignored, generated locally; template `.env.example`). Domains in Dokploy's Domains tab: `tae.rafidahad.me` → fuelops:8100, `tae-grafana.rafidahad.me` → grafana:3000. Never expose simulator (`/admin` has no auth) or Prometheus. Cloudflare proxy off (DNS only) so Traefik gets Let's Encrypt certs.
+
 Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). Deps: `requirements.txt`.
 
 ## Current status
@@ -95,6 +101,8 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 
 ## Decisions
 
+- 2026-09-29 — Grafana host port 3300 (was 3000) because Dokploy's panel uses 3000; `GF_SERVER_ROOT_URL` from `GRAFANA_ROOT_URL`. Subdomains: `tae` (app), `tae-grafana`, `dokploy` (panel). Production mode `auto`.
+- 2026-09-29 — `lp-buffer` = 48 h horizon + 8 h buffer (was 24 h + 4 h): 64% less unmet over 17 crisis recipes, same 7-day result (see Results).
 - 2026-09-29 — Owner answered D1–D4 (plan R4.3); < 24 h to judging → 24-hour cut order.
 
 - 2026-09-29 — Simulator host port **18000** (`SIM_PORT`), bound to 127.0.0.1. Reason: Windows/Hyper-V reserves TCP 7983–8082 on this PC, so 8000 cannot bind. Image unchanged.
@@ -128,6 +136,38 @@ C19: demand identical across `none` and `threshold` runs (8,064 rows, max diff 0
 LP solve time: 84 solves, p50 0.17 s, max 0.39 s, all optimal. **Issue:** LP sends 5,424 small POSTs (~86 L avg) vs 111 for threshold → 396 s wall per 7 d vs 93 s, and would be fragile under latency faults. Fix in executor (request consolidation) — Milestone 3.
 
 "Fuel lost" = start stock + arrived supply − served − (depot + station + in-transit stock) at the end; with no shipping the depots overflow at supply arrivals. 7 days exceeds the ~5.9-day fuel ceiling (C00), so some unmet demand is unavoidable there; the hindsight bound (Milestone 2) will show how much.
+
+### Crisis comparison and horizon/buffer sweep (stepped, 5 days = 480 ticks, surprise events, code at `4ec7eaa`)
+
+Unmet liters. `s*` = `fuelops/scenarios.py` recipes; `h*` = hold-out recipes with other timings/severities (defined in the ad-hoc runner, not used to pick parameters first). H = LP horizon ticks, B = `buffer_ticks`.
+
+| Recipe | threshold | H96 B16 (old default) | H192 B16 | H192 B24 | **H192 B32 (new default)** |
+|---|---:|---:|---:|---:|---:|
+| baseline | 4,304 | 2,583 | 0 | 0 | **0** |
+| s02 spike station | 4,304 | 2,583 | 0 | 0 | **0** |
+| s03 spike region | 6,196 | 0 | 0 | 0 | **0** |
+| s04 primary route down | 9,181 | 3,827 | 0 | 0 | **0** |
+| s05 Tongi isolated | 4,345 | 4,756 | 2,344 | 247 | **0** |
+| s06 Cox's Bazar isolated | 6,782 | 2,731 | 148 | 720 | 1,647 |
+| s07 depot constraint | 4,304 | 2,583 | 0 | 0 | **0** |
+| s08 supply delay | 4,304 | 2,794 | 0 | 0 | **0** |
+| s09 supply shortfall | 4,304 | 3,071 | 0 | 0 | **0** |
+| s10 station outage | 10,146 | 6,828 | 5,842 | 5,842 | 5,842 |
+| s11 overlap | 4,519 | 1,017 | 0 | 0 | **0** |
+| h1 Tongi route, late | 4,943 | 2,583 | 0 | 0 | **0** |
+| h2 Cox's route, 90 ticks | 9,325 | 6,533 | 5,587 | 4,156 | **2,225** |
+| h3 Mirpur outage + Dhaka spike | 17,528 | 15,807 | 13,224 | 13,224 | 13,224 |
+| h4 Gazipur shortfall 0.6 | 4,304 | 4,067 | 0 | 0 | **0** |
+| h5 cross routes + spike | 5,785 | 3,826 | 0 | 0 | 845 |
+| h6 delay + route | 3,833 | 0 | 0 | 0 | **0** |
+| **Total, 17 recipes** | **108,407** | **65,589** | **27,145** | **24,189** | **23,783** |
+
+- 7-day baseline: every LP setting = 97,414 L = the hindsight bound; threshold 97,568.
+- Hindsight bound at 480 ticks = 0 L for baseline, s02, s03 (bound ignores route/supply/outage events, so it is only valid for demand-only recipes).
+- Remaining s10 / h3 loss is inside the outage window (served = 0 during outage, C09) → unavoidable. s06/h5 with B32 lose Cox's Bazar petrol after tick ~450 (end-of-supply squeeze; a larger buffer holds petrol elsewhere).
+- Cause of the old default's baseline loss: Cox's Bazar petrol from tick 450; a 24 h horizon cannot see the Patiya petrol squeeze.
+- 0 FAILED allocations in all 89 runs; threshold lost 366 L to overflow in s04. LP solve p50 0.09–0.11 s, max 0.16 s (H192).
+- Live check (8 ticks/s, 480 ticks, auto mode, one run each): H96 B16 → 2,582 L unmet (no fault), 14,848 L (500 ms latency fault); **H192 B32 → 0 L and 65 L**.
 
 ### Live fault runs (normal speed 8 ticks/s, threshold policy, 400 ticks ≈ 4.2 days, fault injected at 10 s for 15 s)
 
@@ -202,7 +242,25 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 - **P3:** `fuelops/forecast.py` background client (never under the controller lock), multiplier-normalised context (history multiplier from snapshots or rebuilt from public spike events), future multiplier applied once, strict bundle validation, live scoring vs the formula (MAPE, 10–90% coverage), promotion gate reported (planner keeps the formula).
 - **P5:** `fuelops/summary.py` incident cases (events, simulator outage, smart planning off) with versions and bounded evidence packets; background worker, ≤ 6 calls/min, strict JSON schema, evidence-id check, template fallback. **Owner correction: provider is Groq, not xAI Grok** → Groq chat completions, `openai/gpt-oss-120b`.
 - **P6:** Home "Demand forecast" panel (sold, formula, AI range and middle line, accuracy sentence); System "Incident summaries" (AI or rule-based, reason shown) and health rows "AI forecaster (Chronos)", "AI summaries (Groq)".
+- Closes the deployment note below: approve/reject/cancel now require the operator token when one is set.
+- Merged teammates' `lp-buffer` change (48 h horizon, 8 h buffer), Dokploy prep (Grafana 3300) and regression benchmark.
 - Tests: 22 passing (LP override, outage, approval, restart continuity, 6 summary tests with a mocked Groq endpoint).
+
+### 2026-09-29 — Regression benchmark in the repo
+- `fuelops/scenarios.py`: hold-out recipes h1–h6 (previously only in an ad-hoc runner). `fuelops/bench.py`: all policies × recipes in parallel over several simulators, table + total, `--max-total` gate, JSON in `reports/`. `compose.yaml`: `bench` profile with sim-b/c/d (not started by default).
+- Verified: `bench lp-buffer threshold` over 4 simulators reproduces the sweep table exactly (lp-buffer 23,783 L, threshold 108,406 L), 5.5 min wall.
+
+### 2026-09-29 — Deployment prep (Dokploy) + gitignore
+- Stack verified on Linux: `docker compose up -d --build` → all services healthy; 5/5 tests pass in the image; ~240 MB RAM total.
+- `compose.yaml`: Grafana on host 3300, `GF_SERVER_ROOT_URL`. `.env.example` rewritten (comments on own lines, `GRAFANA_ROOT_URL`). `.env.production` generated with random token/password (gitignored, mode 600). `.gitignore`: `.env.*` except example, `.pytest_cache`, `.kilo/`, editor/OS files. `.dockerignore`: `.env*`.
+- Verified: `docker compose config` OK; Grafana answers on 3300; `git check-ignore` covers `.env`, `.env.production`.
+- **Open before going public:** approve/reject/cancel endpoints (`fuelops/api.py` L264/277/286) have no operator-token guard; Dokploy deploy job (`/api/compose.deploy` after CI passes) not added.
+
+### 2026-09-29 — `lp-buffer` default changed to 48 h horizon, 8 h buffer
+- Goal: best automated score on an unknown image (other seed / events). Ran the crisis suite plus 6 hold-out recipes for threshold and four LP settings (89 stepped runs) and a live check; results in **Crisis comparison and horizon/buffer sweep** above.
+- `fuelops/policies.py`: `lp-buffer` = `LPPolicy(horizon=192, buffer_ticks=32, window=48)` (was horizon 96, buffer 16). Total 5-day unmet over 17 recipes 65,589 → 23,783 L; 7-day baseline stays at the hindsight bound.
+- Verified: 11/11 unit tests pass; `harness lp-buffer --recipe s05_tongi_isolated` → 0 L unmet.
+- Open: single run per cell; events are surprise only (LP still ignores scheduled events in `/v1/events`); buffer choice B24 vs B32 is close (24,189 vs 23,783 L).
 
 ### 2026-09-29 — Plan Revision 5 (AI/ML phase) drafted, awaiting approval
 - Reviewed the owner-supplied AI/ML guideline (Chronos-2-Small forecasts, existing LP, Grok incident summaries). Verified externally: model card (28M params, Apache-2.0, predict_df with quantiles), grok-4.7 availability and prices, Responses API structured output. Verified in code: all nine correctness gaps it names are real.

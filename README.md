@@ -16,7 +16,7 @@ docker compose up -d --build
 | What | Where |
 |---|---|
 | Operator application | http://localhost:8100 |
-| Grafana dashboard (anonymous view) | http://localhost:3000 |
+| Grafana dashboard (anonymous view) | http://localhost:3300 |
 | Prometheus | http://localhost:9090 |
 | Simulator API (direct) | http://localhost:18000/docs |
 | Backend health (JSON) | http://localhost:8100/api/health |
@@ -38,6 +38,8 @@ Stop with `docker compose down` (add `-v` to also delete the decision history vo
 | `FUELOPS_MODE` | manual | `observe` (read only), `manual` (operator approves), `auto` (confident recommendations are sent; low confidence waits for review) |
 | `FUELOPS_OPERATOR_TOKEN` | empty | When set, lab controls, mode and planner changes require this token |
 | `GRAFANA_ADMIN_PASSWORD` | change-me | Grafana admin login |
+| `GRAFANA_PORT` | 3300 | Grafana host port (3000 is taken by Dokploy's panel) |
+| `GRAFANA_ROOT_URL` | http://localhost:3300 | Grafana's public URL (production: https://tae-grafana.rafidahad.me) |
 
 No secrets are stored in the repository. All ports bind to `127.0.0.1`.
 

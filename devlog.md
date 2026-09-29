@@ -235,6 +235,11 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 
 ## Log
 
+### 2026-09-29 — LP and card durations in simulated hours
+- `lp-buffer` = `LPPolicy(hours={"horizon": 48, "buffer": 8, "window": 12, "replan": 2})`, converted with the live `tick_minutes` (same 192/32/48/8 ticks at 15 min). Card risk window = 12 h (`decisions.py`).
+- Verified: 11 tests pass; bench at 15 min unchanged (23,783 L).
+- **Finding:** `POST /admin/reset` reloads the scenario YAML and puts `tick_minutes` back to 15 even when the container has `TICK_MINUTES=30`; the env only applies at container start. So a 30-min benchmark cannot be run through the resetting harness.
+
 ### 2026-09-29 — AI phase execution (P0, P2, P3, P5, P6 in progress)
 - **P0 done:** LP rejects incomplete/invalid demand overrides; station outage = demand unmet, stock frozen (projection + LP, POSTs blocked only during the outage window); approval must match what the operator saw (409 otherwise); operator token on approve/reject/cancel; intent journal moved to the durable data volume; app restart continues the run when the simulator tick shows continuity and reconciles unknown shipments by idempotency key (never re-sent); keys carry a boot id.
 - **C11 verified** on a throwaway simulator: hour factor is taken at the tick's own start hour (mean error 5.2%, max 12%; ±1 tick shift gives up to 249% error at hour boundaries). Noise looks uniform ±10% (σ ≈ 5.7%), so the formula is the true mean demand: a forecaster cannot beat it on average.

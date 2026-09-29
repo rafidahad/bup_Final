@@ -44,13 +44,23 @@ class LPPolicy:
     in-transit stock. Cuts requests ~50x; batch=False executes the plan tick by tick.
     """
 
-    def __init__(self, horizon=96, replan=8, stress=1.0, batch=True, buffer_ticks=0, window=None):
+    def __init__(self, horizon=96, replan=8, stress=1.0, batch=True, buffer_ticks=0, window=None, hours=None):
         self.horizon, self.replan, self.stress, self.batch = horizon, replan, stress, batch
         self.buffer_ticks = buffer_ticks
         self.window = window or replan  # ticks of planned flow sent per batch
+        # hours={"horizon": 48, ...}: durations in simulated hours, converted with the live tick size
+        # (TICK_MINUTES is configurable, so tick counts tuned at 15 min would mean other durations)
+        self.hours, self.tick_minutes = hours, None
         self.reserve_incoming = batch  # unbatched: LP models arrival clipping itself
         self.plan, self.solved_at, self.log = None, None, []
         self.exec_delay = 0  # ticks between snapshot and submission; the live controller measures it
+
+    def _use_tick_minutes(self, tm):
+        if not self.hours or tm == self.tick_minutes:
+            return
+        self.tick_minutes = tm
+        for name, h in self.hours.items():
+            setattr(self, name if name != "buffer" else "buffer_ticks", max(1, round(h * 60 / tm)))
 
     def invalidate(self):
         """Force a re-solve on the next call (plan §9.1: replan immediately on events)."""
@@ -58,6 +68,7 @@ class LPPolicy:
 
     def __call__(self, snap):
         from .lp import solve  # scipy import only when used
+        self._use_tick_minutes(snap.get("tick_minutes", 15))
         v = snap["tick"]
         if self.plan is None or v - self.solved_at >= self.replan:
             try:
@@ -87,4 +98,4 @@ POLICIES["lp"] = LPPolicy
 POLICIES["lp-tick"] = lambda: LPPolicy(batch=False)
 # D4: hand-set 8 h safety buffer; sends 12 h of planned flow per batch (operator-sized recommendations).
 # 48 h horizon: 24 h cannot see the end-of-supply petrol squeeze at Patiya/Cox's Bazar (devlog, horizon sweep).
-POLICIES["lp-buffer"] = lambda: LPPolicy(horizon=192, buffer_ticks=32, window=48)
+POLICIES["lp-buffer"] = lambda: LPPolicy(hours={"horizon": 48, "buffer": 8, "window": 12, "replan": 2})

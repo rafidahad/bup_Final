@@ -7,7 +7,7 @@ from .execute import blocked_routes, incoming_total
 from .intel import confidence, project
 from .sim import FUELS
 
-HORIZON = 48          # risk window: 12 simulated hours at the default tick
+HORIZON_HOURS = 12    # risk window in simulated hours (converted with the live tick size)
 REVIEW_BELOW = 0.5    # PS §11: low confidence → human review
 AT_RISK = 0.2         # risk threshold for a card without any proposal
 
@@ -25,10 +25,11 @@ def build_cards(snap, proposals, noise_stats, degraded, source):
             budget[a["source_depot_id"]] -= a["quantity"]
 
     cards = {}
+    horizon = max(1, round(HORIZON_HOURS * 60 / snap.get("tick_minutes", 15)))
     for sid, st in snap["stations"].items():
         sigma, n = noise_stats.get(st["demand_profile"], (0.1, 0))
         for f in FUELS:
-            before = project(snap, sid, f, HORIZON, sigma=sigma)
+            before = project(snap, sid, f, horizon, sigma=sigma)
             wants = by_sf.get((sid, f), [])
             if not wants and before["risk"] < AT_RISK and before["stockout_hours"] is None:
                 continue
@@ -47,14 +48,14 @@ def build_cards(snap, proposals, noise_stats, degraded, source):
                                     "requests": math.ceil(liters / r["max_shipment"]), "limits": limits,
                                     "binding": binding if liters >= 0.99 * limits[binding] else None})
                 extra.append((arrival, liters))
-            after = project(snap, sid, f, HORIZON, extra=extra, sigma=sigma) if extra else None
+            after = project(snap, sid, f, horizon, extra=extra, sigma=sigma) if extra else None
             alternatives = []
             for r in snap["routes"].values():
                 if r["destination_station_id"] != sid or any(a["route_id"] == r["id"] for a in allocations):
                     continue
                 usable = r["status"] == "AVAILABLE" and r["id"] not in blocked
                 liters = sum(a["liters"] for a in allocations) or min(r["max_shipment"], max(headroom, 0))
-                alt = project(snap, sid, f, HORIZON, extra=[(tick + r["transit_ticks"], liters)], sigma=sigma) \
+                alt = project(snap, sid, f, horizon, extra=[(tick + r["transit_ticks"], liters)], sigma=sigma) \
                     if usable and liters > 0 else None
                 alternatives.append({"route_id": r["id"], "depot_id": r["source_depot_id"], "usable": usable,
                                      "reason": None if usable else "route disrupted or about to be",

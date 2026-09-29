@@ -14,7 +14,7 @@ import numpy as np
 from scipy.optimize import linprog
 from scipy.sparse import coo_matrix
 
-from .projection import closed_ticks, nominal
+from .projection import closed_ticks, multiplier_change, nominal, route_closed_ticks, supply_after_events
 from .sim import FUELS
 
 
@@ -68,12 +68,11 @@ def solve(snap, horizon=96, demand=None, stress=1.0, weights="decreasing",
     # shipments
     x = {}
     for r in routes:
-        road_open = r["status"] == "AVAILABLE"
+        road_closed = route_closed_ticks(snap, r["id"])  # public disruption windows (C08: departs in its POST tick)
         st_closed = closed_ticks(snap, r["destination_station_id"])  # the server rejects POSTs while closed
         for f in FUELS:
             for k in range(H):
-                # ponytail: a disrupted road is assumed closed for the whole horizon (end ticks not modelled yet)
-                ok = road_open and k >= earliest and not st_closed(v + k)
+                ok = not road_closed(v + k) and k >= earliest and not st_closed(v + k)
                 x[r["id"], f, k] = V.add(hi=None if ok else 0.0, cost=c_tx * r["transit_ticks"])
 
     # depots
@@ -82,8 +81,8 @@ def solve(snap, horizon=96, demand=None, stress=1.0, weights="decreasing",
         if a["created_tick"] == v and a["status"] != "CANCELLED":
             created_now[a["source_depot_id"]] += a["quantity"]
     supply = {}
-    for s in snap["supply"]:
-        if s["status"] != "ARRIVED" and v <= s["planned_tick"] < v + H:
+    for s in supply_after_events(snap):
+        if v <= s["planned_tick"] < v + H:
             key = (s["depot_id"], s["fuel_type"], s["planned_tick"] - v)
             supply[key] = supply.get(key, 0.0) + s["quantity"]
     for d, dep in snap["depots"].items():
@@ -112,6 +111,7 @@ def solve(snap, horizon=96, demand=None, stress=1.0, weights="decreasing",
                 existing[eta - v] = existing.get(eta - v, 0.0) + q
             cap = st["capacity"][f]
             closed = closed_ticks(snap, sid)
+            spike = multiplier_change(snap, st)
             I = [V.add(lo=st["inventory"][f], hi=st["inventory"][f])]
             for k in range(H):
                 t = v + k
@@ -120,7 +120,7 @@ def solve(snap, horizon=96, demand=None, stress=1.0, weights="decreasing",
                     if q is None or not math.isfinite(q) or q < 0:  # a missing key must never mean 0 L demand
                         raise ValueError(f"demand override incomplete or invalid at {(sid, f, t)}: {q!r}")
                 else:
-                    q = nominal({**st, "status": "OPEN"}, f, t, region[st["region_id"]], tm, stress)
+                    q = nominal({**st, "status": "OPEN"}, f, t, region[st["region_id"]], tm, stress) * spike(t)
                 total_demand += q
                 w = 1.0 if weights == "flat" else 1.0 + eps * (H - k)
                 # C09: during an outage nothing is sold (y = 0), the demand is unmet, stock stays frozen

@@ -102,3 +102,36 @@ def test_projection_counts_outage_demand_as_unmet():
     p = project(snap, "s", "DIESEL", 8)
     assert p["unmet"] == pytest.approx(4 * PER_TICK, rel=1e-6)  # ticks 72..75 closed, stock untouched
     assert p["stockout_hours"] is None
+
+
+def _event(typ, start, end, status, **params):
+    return {"type": typ, "start_tick": start, "end_tick": end, "status": status, "parameters": params}
+
+
+def test_known_disruption_blocks_only_its_window():
+    # route disrupted for offsets 0..4 (ticks 72..76): no shipment then, shipping allowed after it ends
+    snap = world(station_inv=0.0, depot_inv=5000.0)
+    snap["routes"]["rt"]["status"] = "DISRUPTED"
+    snap["events"] = [_event("route_disruption", 72, 77, "ACTIVE", route_ids=["rt"])]
+    r = solve(snap, horizon=12, headroom_margin=0)
+    ks = sorted(k for (_, _, k), q in r["x"].items() if q > 1e-6)
+    assert ks and min(ks) >= 5
+
+
+def test_scheduled_disruption_makes_the_lp_ship_ahead():
+    # sole route closes from offset 2 for the rest of the horizon: everything must leave at offsets 0..1
+    snap = world(station_inv=0.0, station_cap=6000.0, depot_inv=5000.0)
+    snap["events"] = [_event("route_disruption", 74, 200, "SCHEDULED", route_ids=["rt"])]
+    r = solve(snap, horizon=24, headroom_margin=0)
+    assert all(k < 2 for (_, _, k), q in r["x"].items() if q > 1e-6)
+    assert sum(r["x"].values()) >= 20 * PER_TICK - 1e-3
+
+
+def test_scheduled_spike_and_shortfall_are_projected():
+    base = solve(world(station_inv=0.0, depot_inv=0.0, supply=[(5, 1000.0)]), horizon=10, headroom_margin=0)
+    snap = world(station_inv=0.0, depot_inv=0.0, supply=[(5, 1000.0)])
+    snap["events"] = [_event("demand_spike", 72, 82, "SCHEDULED", multiplier=2.0),
+                      _event("supply_shortfall", 74, 75, "SCHEDULED", depot_ids=["d"], factor=0.5)]
+    r = solve(snap, horizon=10, headroom_margin=0)
+    assert r["demand"] == pytest.approx(2 * base["demand"], rel=1e-9)
+    assert sum(r["x"].values()) <= 500 + 1e-6  # only half the scheduled supply will exist

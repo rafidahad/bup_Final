@@ -42,7 +42,7 @@ docker compose up -d                      # simulator on http://localhost:18000 
 .venv/Scripts/python.exe -m fuelops.harness threshold none --ticks 672   # stepped benchmark → reports/
 ```
 
-Regression benchmark (resets every simulator it uses — never point it at the demo/production one): `docker compose --profile bench up -d sim-b sim-c sim-d`, then `docker compose run --rm --no-deps -v "$PWD/reports:/app/reports" fuelops python -m fuelops.bench lp-buffer threshold --sims http://simulator-api:8000,http://sim-b:8000,http://sim-c:8000,http://sim-d:8000 --max-total 23783` (17 recipes × 5 days, ~5 min; exit 1 if `lp-buffer` gets worse). Stop the extras with `docker compose --profile bench stop sim-b sim-c sim-d`.
+Regression benchmark (resets every simulator it uses — never point it at the demo/production one): `docker compose --profile bench up -d sim-b sim-c sim-d`, then `docker compose run --rm --no-deps -v "$PWD/reports:/app/reports" fuelops python -m fuelops.bench lp-buffer threshold --sims http://simulator-api:8000,http://sim-b:8000,http://sim-c:8000,http://sim-d:8000 --max-total 21291` (17 recipes × 5 days, ~5 min; exit 1 if `lp-buffer` gets worse). Stop the extras with `docker compose --profile bench stop sim-b sim-c sim-d`.
 
 Full stack: `docker compose up -d --build` → app http://localhost:8100, Grafana http://localhost:3300, Prometheus :9090, simulator :18000 (all 127.0.0.1).
 
@@ -234,6 +234,10 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 - Execute the 24-hour cut (plan R4.3): M3 → M5 → M7 → M6 → M4 → M8 → M9.
 
 ## Log
+
+### 2026-09-29 — Event-aware LP (route windows, future spikes, scheduled supply changes)
+- `projection.py`: `route_closed_ticks` (public disruption windows; disrupted with no visible end = whole horizon), `multiplier_change` (scheduled spikes inside their window, active spikes divided out after their end; filters AND, empty = all), `supply_after_events` (scheduled delay/shortfall applied to not-yet-arrived rows, C13). `lp.py` uses all three (outage windows were already there).
+- Bench, 17 recipes × 5 days: **surprise 23,783 → 21,291 L; announced 19,066 L** — every remaining liter is inside an outage window (s10, h3), so unavoidable (C09). 25 tests pass (3 new).
 
 ### 2026-09-29 — Live on Dokploy; Grafana dashboard mount fix
 - Live: https://tae.rafidahad.me (health: all components healthy), https://tae-grafana.rafidahad.me (200). Dokploy Compose Path set to `./compose.yaml` in the UI (file not renamed). Grafana domain container port = 3000 (3300 is only the host port).

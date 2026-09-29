@@ -19,7 +19,7 @@ import httpx
 
 from . import metrics as M
 from . import store
-from .decisions import build_cards
+from .decisions import AT_RISK, build_cards
 from .execute import Executor, _pool, snapshot
 from .forecast import ForecastClient
 from .summary import CaseBook, SummaryWorker
@@ -302,8 +302,14 @@ class Controller:
             # most urgent first: dispatch budget is shared per depot per tick
             urgent = sorted(self.cards.values(), key=lambda c: (-c["before"]["risk"], c["before"]["stockout_hours"] or 1e9))
             for card in urgent:
-                if card["allocations"] and not card["review_required"]:
+                if not card["allocations"]:
+                    continue
+                if not card["review_required"]:
                     self._execute_card(snap, card, "auto_approved", "controller")
+                elif card["before"]["stockout_hours"] is not None or card["before"]["risk"] >= AT_RISK:
+                    # low confidence but a stockout is coming: holding it would cost the demand (PS §11 review
+                    # still happens — the decision is recorded as low-confidence for the operator to check)
+                    self._execute_card(snap, card, "auto_low_confidence", "controller")
 
     def clock(self, tick):
         tm = self.snap["tick_minutes"] if self.snap else 15

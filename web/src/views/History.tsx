@@ -4,7 +4,7 @@ import { clock, fuel, inTicks, liters, roadName, stationName } from "@/lib/text"
 import { cn } from "@/lib/utils"
 import { FuelDot, Panel } from "./parts"
 
-const WHO: Record<string, string> = { approved: "by you", auto_approved: "automatically", rejected: "skipped by you" }
+const WHO: Record<string, string> = { approved: "by you", auto_approved: "automatically", auto_low_confidence: "automatically (low confidence — please check)", rejected: "skipped by you" }
 
 export function History({ status }: { status: Status | null }) {
   const tm = status?.tick_minutes ?? 15

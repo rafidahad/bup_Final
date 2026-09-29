@@ -235,6 +235,11 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 
 ## Log
 
+### 2026-09-29 — Auto mode no longer starves stations when confidence is low
+- Test (sim-c, live 8 ticks/s, 480 ticks, auto): normal crises and `stale_data` never tripped the review gate (`degraded` is cleared before cards are built; stale_data does not set it). But with intelligence off (threshold fallback) any depot/supply event gave every card confidence 0.4 → review required → **no shipping for the whole event: 205,188 L unmet, service 0.559**.
+- `controller.py`: auto mode still ships a low-confidence card when a stockout is coming (stockout within the risk window or risk ≥ AT_RISK), recorded as `auto_low_confidence` for the operator to check; non-urgent low-confidence cards still wait (PS §11). `decisions.py`: depot/supply events only touch stations served by an affected depot. History view labels the new status.
+- Verified: same case → **4,303 L, service 0.991** (= gate off); early-run route disruption 0 L; 26 tests pass (1 new, 1 updated).
+
 ### 2026-09-29 — Controller keeps up when the simulator is stepped externally
 - Test (sim-d, 480 external `/admin/step` calls, auto mode, lp-buffer): at 50/125/250 ms between steps 0 L unmet; back-to-back (~19 ms/step) lost 4–5.5k L because the lag estimate was capped at 16 ticks (measured 29–54) and each cycle made one health read per card and a history pull every 8 ticks.
 - `controller.py`: lag cap 64, one health read per cycle, history pull every 32 ticks (200 rows/station still cover ~66 ticks); executor `lookahead` = measured lag so no POST lands on a road that closes before it departs (C18).

@@ -90,7 +90,10 @@ def _touches(e, snap, sid):
     if e["type"] == "route_disruption":
         into = [r for r in snap["routes"].values() if r["destination_station_id"] == sid]
         return not p.get("route_ids") or any(r["id"] in p["route_ids"] for r in into)
-    return True  # depot / supply events affect every station's supply chain
+    # depot / supply events: only stations served by an affected depot (empty filter = every depot)
+    ids = p.get("depot_ids") or []
+    return not ids or any(r["source_depot_id"] in ids for r in snap["routes"].values()
+                          if r["destination_station_id"] == sid)
 
 
 def _why(before, st, fuel):

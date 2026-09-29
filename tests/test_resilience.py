@@ -91,16 +91,28 @@ def test_intelligence_off_falls_back_to_rule_policy_and_keeps_operating():
     assert any(i["kind"] == "intelligence" for i in ctl.incidents)
 
 
-def test_low_confidence_during_crisis_requires_review():
+def _crisis_sim():
     sim = FakeSim()
     sim.world["events"] = [{"id": 1, "type": "demand_spike", "start_tick": 5, "end_tick": 50, "status": "ACTIVE",
                             "parameters": {"station_ids": ["s"], "multiplier": 2.0}}]
     sim.world["stations"][0]["demand_multiplier"] = 2.0
-    ctl = _ctl(sim)
+    return sim
+
+
+def test_low_confidence_during_crisis_requires_review():
+    ctl = _ctl(_crisis_sim(), mode="manual")
     ctl.cycle()
     card = ctl.cards["s:DIESEL"]
     assert card["confidence"] < 0.5 and card["review_required"]
-    assert sim.posts == []
+
+
+def test_auto_mode_still_ships_an_urgent_low_confidence_card():
+    # holding it would starve a station that is about to run out; it is sent and flagged for review instead
+    sim = _crisis_sim()
+    ctl = _ctl(sim)
+    ctl.cycle()
+    assert sim.posts
+    assert any(d["status"] == "auto_low_confidence" for d in store.decisions())
 
 
 def test_confident_card_is_sent_in_auto_mode():

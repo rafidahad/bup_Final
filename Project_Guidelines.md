@@ -2,8 +2,6 @@
 
 A working operator application for the **BUP CSE Fest 2026 fuel supply challenge**. Fuel Operations observes the official simulator, estimates shortages, optimizes replenishment, explains recommendations, and records operator decisions while exposing health and performance information.
 
-**Documentation baseline:** repository commit [0b2dd5c](https://github.com/rafidahad/bup_Final/commit/0b2dd5c2660cd9ec86081c7eeaf65bda27582f0a), reviewed on 29 September 2026. This README follows all **26 sections** of the [official problem statement](Problem_Statement_BUP_CSE_Fest_2026.pdf). “Implemented” describes code present in this snapshot; recorded results are historical evidence, not new measurements from this documentation review.
-
 > **Current intelligence:** formula-based demand estimation, statistical diagnostics, stockout projection, a SciPy/HiGHS linear optimizer, and a threshold fallback. **Chronos forecasting and Grok incident summaries are approved plans, not implemented features in this snapshot.** No model training or API key is needed to run the current application.
 
 ## Quick start
@@ -52,8 +50,6 @@ docker compose down
 ~~~
 
 The normal stop command preserves the application's named SQLite volume. Simulator state has a separate lifecycle; preserving application history does not preserve the simulated world.
-
-**Reading guide:** [architecture and source layout](#5-what-your-team-must-build) · [intelligence and AI roadmap](#7-intelligence-requirement) · [deployment](#12-devops-requirement) · [load-test evidence](#17-load-testing) · [demo](#22-suggested-demonstration-story) · [known limitations](#24-constraints-and-guardrails)
 
 ## 1. Executive Summary
 
@@ -357,7 +353,7 @@ flowchart LR
     SHADOW -. "Only after promotion and full horizon alignment" .-> LP["Existing LP planner"]
     FORM["Current formula forecast"] --> LP
     HIST --> JOB["Planned background summary worker"]
-    JOB --> GROK["Grok API"]
+    JOB --> GROQ["Groq API"]
     GROK --> CHECK["Schema and evidence validation"]
     CHECK --> SUMMARY["Stored incident summary"]
     JOB --> TEMPLATE["Factual template fallback"]
@@ -475,8 +471,6 @@ CI runs on pull requests and pushes to main. It tests and smoke-deploys the stac
 | GRAFANA_PORT | 3000 | Host dashboard port |
 | GRAFANA_ADMIN_PASSWORD | change-me | Change before shared use |
 | FUELOPS_VERSION | dev | Compose application image tag |
-
-See [.env.example](.env.example) for the supplied configuration. Direct backend development also supports SIM_URL, FUELOPS_DB, and FUELOPS_WEB; Compose sets container-specific values.
 
 ### VPS access and persistence
 

@@ -2,3 +2,8 @@
 __pycache__/
 reports/
 *.pyc
+data/
+*.db
+.env
+web/node_modules/
+web/dist/

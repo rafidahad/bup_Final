@@ -235,6 +235,9 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 
 ## Log
 
+### 2026-09-29 — Groq summary rate limit 3 calls/min
+- Groq free tier = 8,000 tokens/min for `openai/gpt-oss-120b`; a summary is ~2k input + up to 2k output tokens, so 6 calls/min would hit 429s (template fallback) during a crisis. `summary.py` default 6 → 3; `GROQ_MAX_CALLS_PER_MINUTE` now passed through `compose.yaml` (it was not reaching the container) and listed in `.env.example`. 26 tests pass.
+
 ### 2026-09-29 — Auto mode no longer starves stations when confidence is low
 - Test (sim-c, live 8 ticks/s, 480 ticks, auto): normal crises and `stale_data` never tripped the review gate (`degraded` is cleared before cards are built; stale_data does not set it). But with intelligence off (threshold fallback) any depot/supply event gave every card confidence 0.4 → review required → **no shipping for the whole event: 205,188 L unmet, service 0.559**.
 - `controller.py`: auto mode still ships a low-confidence card when a stockout is coming (stockout within the risk window or risk ≥ AT_RISK), recorded as `auto_low_confidence` for the operator to check; non-urgent low-confidence cards still wait (PS §11). `decisions.py`: depot/supply events only touch stations served by an affected depot. History view labels the new status.

@@ -25,7 +25,7 @@ MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b")
 BASE_URL = os.environ.get("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
 TIMEOUT = float(os.environ.get("GROQ_TIMEOUT_SECONDS", "20"))
 MAX_ATTEMPTS = int(os.environ.get("GROQ_MAX_ATTEMPTS", "2"))
-PER_MINUTE = int(os.environ.get("GROQ_MAX_CALLS_PER_MINUTE", "6"))
+PER_MINUTE = int(os.environ.get("GROQ_MAX_CALLS_PER_MINUTE", "3"))  # Groq free tier: 8,000 tokens/min
 MAX_OUTPUT_TOKENS = int(os.environ.get("GROQ_MAX_OUTPUT_TOKENS", "2000"))  # includes the model's reasoning tokens
 
 # Groq strict mode: every field required, additionalProperties false, plain types (lengths enforced by us below).

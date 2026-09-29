@@ -23,8 +23,161 @@
 
 The probe list (§4.4) and execution-safety rules (§10.3–10.7) are unchanged apart from the additions noted above.
 
+## Revision 4 — alignment with the official problem statement
+
+The official problem statement (`Problem_Statement_BUP_CSE_Fest_2026.pdf`, BUP CSE Fest 2026 Hackathon Finals, 11 pages) arrived on 29 Sep 2026, after Revision 3 and after implementation had started. **Where Revision 4 conflicts with any earlier section, Revision 4 wins.** Statement sections are cited as "PS §n".
+
+### R4.1 What the statement settles
+
+- **Product:** a "Fuel Supply Intelligence & Resilience Platform" for an operations team. It must observe the network, identify emerging shortages, help decide constrained allocation, respond to disruptions, expose reasoning, stay usable during failures, and show measured performance under load (PS §1).
+- **Engineering loop to demonstrate:** Observe → Detect → Predict → Decide → Simulate → Act → Monitor → Recover (PS §2). Judges must be able to interact with a working system.
+- **Must include:** operator-facing application (web recommended; a notebook is not enough), backend, intelligence component, deployment, observability, resilience, and load testing (PS "Challenge at a Glance", §5–§6).
+- **Intelligence:** at least one meaningful AI / ML / optimization / detection capability. Optimization and detection qualify on their own; RL is optional and, if used, must be compared against a rule-based approach (PS §7–§8).
+- **Human review:** preserve human review for consequential simulated decisions (PS §24). Low prediction confidence must request human review (PS §11).
+- **Surprises:** organizers may introduce domain and engineering events during development or judging, and the environment may change (PS §2, §26).
+- **Judging is not a simulator score.** No service-level formula is used. Weights (PS §23):
+
+| Criterion | Weight | Current status | Where Revision 4 puts the work |
+|---|---:|---|---|
+| Working product & user experience | 20% | API skeleton only; no UI | R4.6 M5 operator app |
+| Intelligence & decision quality | 20% | LP within 3 L of hindsight bound (stepped); threshold fallback | M3 decision support: detection, prediction, recommendation cards, what-if impact |
+| Architecture & integration | 15% | Client, probes, executor, controller | M3–M5; architecture diagram in M9 |
+| DevOps & engineering quality | 15% | Simulator compose only; 4 unit tests | M7 containers, CI, tests |
+| Resilience & incident response | 10% | Retries, disruption guard, reset detection, live fault runner | M4 resilience behaviours and demos |
+| Observability & performance | 10% | None beyond logs | M6 metrics, dashboards, health; M8 load test |
+| Demo & problem understanding | 10% | Strong measured understanding (probes, supply analysis) | M9 demo script following PS §22 |
+
+Consequence: Revision 3's optimizer and benchmark evidence remain the core of "Intelligence & decision quality", but **most remaining effort moves to the operator application, decision support, DevOps, observability, resilience demonstration, and load testing.** The Revision 3 gate "a score exists" is replaced by "a demonstrable loop exists".
+
+### R4.2 Gap analysis
+
+| Statement requirement | Status now | Action |
+|---|---|---|
+| Operator web app with a meaningful subset of: inventory, depot/station status, regional demand, shortage alerts, projected shortage risk, incoming supply, disruptions, recommended allocations, expected impact, system alerts, decision history, service health (PS §6) | Missing | Five views (R4.5); all twelve items covered. |
+| Inspectable recommendations: why at risk, signals, constraints, expected impact, confidence/uncertainty, alternatives (PS §9 card: projected stockout hours, inventory, expected demand, recommended liters and depot, risk before → after) | Missing | Recommendation card (R4.4) built from projection, LP/threshold output, and what-if simulation. |
+| Detect: anomalous demand, abnormal inventory changes, bottlenecks, emerging regional disruptions (PS §7) | Missing | Rule-based detectors on residuals, inventory deltas, dispatch-budget saturation, and public events. |
+| Predict: shortage prediction, stockout probability (PS §7, §9) | Deterministic time-to-stockout exists in projection | Add stockout risk % and confidence (R4.3 decision D1). |
+| Simulate: "allocation is simulated" before acting (PS §2, §22 step 8) | Projection engine can do it | What-if: projected trajectory with and without the recommended allocation. |
+| Crisis handling: shipment delay, demand spike, depot constraint, regional disruption, combined; detect → evaluate → respond → explain → monitor recovery (PS §10) | Recipes + disruption guard; LP reacts; no UI | Incident timeline per event with impact, response, and recovery status. |
+| Resilience mappings: ML unavailable → fallback policy; invalid simulator response → reject + alert; low confidence → human review; dependency unavailable → retry / cached state / degraded (PS §11) | Retries, degraded flag, fallback exists | Response schema validation, circuit breaker, cached state in UI, intelligence kill switch for demo, confidence gate. |
+| Deployment: `docker compose up`; Source → Build → Test → Package → Deploy → Health check; CI/CD strongly encouraged (PS §12) | Simulator only | Dockerfile(s), full compose with health checks, GitHub Actions. |
+| Observability: app (rate, latency, errors, availability), system (CPU, memory), intelligence (prediction error, confidence, alert rate, decision frequency, fallback activations), logs (PS §14) | Missing | Prometheus `/metrics`, Grafana provisioned dashboard, structured JSON logs. |
+| Health page: backend, database, simulator, prediction service, decision engine, p95 latency, error rate (PS §15) | Missing | `/api/health` + System health view. |
+| Load test: one meaningful path; avg, p50, p95, p99, throughput, error rate, concurrency, resource usage (PS §17) | Missing | k6 (container) against dashboard backend and decision request paths; report in devlog. |
+| Security hygiene: no hard-coded secrets, validate input, handle failures, document config, restrict sensitive actions (PS §18) | Partial | `.env` config, Pydantic validation, operator token for lab/mode/auto actions. |
+| Deliverables 1–11 incl. architecture diagram, observability evidence, resilience demo, load-test evidence (PS §19) | 1, 3 partial | Tracked in R4.7. |
+| Recommended: CI/CD, automated tests, decision audit history, scenario configuration, simulation replay, automated fallback, rollback (PS §20) | Tests, scenarios, replay (stepped harness), fallback partial | Audit history in SQLite; policy rollback = switch policy version from UI. |
+
+### R4.3 Decisions that need the owner (asked before execution)
+
+- **D1 — Predict/Detect scope.** The statement does not require ML, but "stockout risk 72% → 19%" (PS §9), "model confidence" (PS §14), and "confidence too low → human review" (PS §11) need a probability. **Proposal:** compute stockout risk and confidence now with statistics (the observed demand-noise distribution from `/v1/demand-history`, applied to the deterministic projection), and rule-based detectors. Learned forecasting and LLM explanations stay in the next phase (§25), added later as optional layers with fallbacks. This relaxes one earlier rule: history would feed displayed risk and confidence, not only residual reports. Optimizer decisions stay deterministic.
+- **D2 — Time remaining** until submission and judging, which decides how much of M8–M9 and the next phase fits.
+- **D3 — Documentation.** Deliverable PS §19.2 needs setup and deployment instructions. **Proposal:** `README.md` holds only setup/deploy instructions and the architecture diagram; `devlog.md` stays the single working log.
+- **D4 — Live policy.** The LP is near-optimal stepped but fragile live without safety stock (devlog). **Proposal:** LP with a hand-set safety buffer as the recommender, threshold as the fallback and live default until the buffered LP is measured live.
+
+### R4.4 Recommendation card (PS §9)
+
+Every recommendation is a stored, inspectable object:
+
+| Field | Source |
+|---|---|
+| Station, fuel, region | Snapshot |
+| Why at risk: projected stockout time (hours), current inventory, expected demand over the horizon, incoming supply | Deterministic projection (§8) |
+| Signals that influenced it | Active events, demand multiplier, detector hits, route status |
+| Recommended allocation: liters, source depot, route, arrival tick | LP (or threshold fallback, labelled) |
+| Constraints that bind | Depot stock, dispatch budget, route limit, destination headroom, route availability |
+| Expected impact: stockout time and unmet liters with vs without; stockout risk before → after | What-if projection; risk per D1 |
+| Confidence / uncertainty | Per D1; low confidence routes the card to human review |
+| Alternatives | Other feasible routes/depots with their impact, or "wait" |
+| Decision | Pending, approved (by operator), auto-approved (guardrails), rejected, expired; audit trail |
+
+### R4.5 Architecture and operator application
+
+```text
+Official simulator (container, unchanged)
+   │  REST
+   ▼
+Backend container — FastAPI, one operational writer
+ ├─ Observe   collector: parallel snapshot, response validation, retries, circuit breaker, cached state
+ ├─ Detect    detectors: demand anomaly, abnormal inventory change, dispatch bottleneck, regional disruption
+ ├─ Predict   projection, time-to-stockout, stockout risk + confidence (D1)
+ ├─ Decide    LP optimizer + threshold fallback → recommendation cards
+ ├─ Simulate  what-if projection with / without each recommendation
+ ├─ Act       approval queue (manual default), guarded auto mode, idempotent executor
+ ├─ Monitor   /metrics (Prometheus), /api/health, JSON logs, decision audit (SQLite)
+ └─ Recover   degraded mode, reset detection, intelligence kill switch → fallback
+   │  /api/*  (web app served by the backend)
+   ▼
+Operator web app — React + TypeScript + Vite + shadcn/ui + Tailwind
+Prometheus + Grafana (containers, provisioned)      k6 load tests (container)
+GitHub Actions CI: tests → build → package → compose smoke test (health check)
+```
+
+The prediction service stays a module inside the backend with its own health status and a kill switch, rather than a separate container. That demonstrates "ML model unavailable → fallback" (PS §11) without extra infrastructure (PS §13 warns against complexity that does not improve the solution).
+
+Operator application views (replaces §13.2):
+
+| View | PS §6 items covered |
+|---|---|
+| Overview | Current inventory, depot and station status, regional demand, incoming supply, disruptions, network map |
+| Alerts & recommendations | Shortage alerts, projected shortage risk, recommended allocations, expected impact, approve / reject |
+| Decisions | Decision history and audit trail, outcomes of executed allocations |
+| Incidents & lab | Crisis timeline (detect → respond → recover), system alerts; lab controls to inject events and faults for the demo (operator token) |
+| System health | Service health per component, p95 latency, error rate, fallback state, links to Grafana |
+
+### R4.6 Revised milestones (replaces §17 Milestones 3–5)
+
+Milestones 0–2 are done (devlog). Remaining work, in priority order:
+
+| # | Milestone | Main PS sections | Gate |
+|---|---|---|---|
+| M3 | Decision-support core: detectors, stockout projection and risk, recommendation cards with what-if impact, approval queue, SQLite decision audit, buffered LP (D4) | §6, §7, §9, §10, §24 | Recommendations visible via API for a crisis recipe, with impact and alternatives; approval executes through the existing executor |
+| M4 | Resilience behaviours: response validation (reject + alert), circuit breaker and cached state, intelligence kill switch → fallback, low-confidence → review, degraded mode | §11 | Each PS §11 mapping demonstrated once and logged |
+| M5 | Operator web app: five views, lab controls, clear loading/degraded/empty states | §6, §22 | The 14-step demo story (PS §22) runs end to end in the browser |
+| M6 | Observability: Prometheus metrics, Grafana dashboard, JSON logs, `/api/health` + health view | §14, §15 | Metrics and a failure visible in Grafana and in the health view |
+| M7 | DevOps: Dockerfile, full `docker compose up` (simulator, backend+web, Prometheus, Grafana) with health checks, `.env.example`, GitHub Actions CI | §12, §18 | Clean clone → one command → healthy system; CI green |
+| M8 | Load testing: k6 scenarios on dashboard backend and decision request; report avg/p50/p95/p99, throughput, errors, concurrency, resource use | §17 | Report recorded in devlog with limits found |
+| M9 | Delivery: architecture diagram, README setup, demo script, rehearsal, final verification against R4.7 | §19, §22 | All required deliverables checked |
+| Next | Learned forecast, LLM incident explanations, parameter tuning on crisis recipes (§25) | §7, §21 | Only after M9, and only if it beats the deterministic baseline |
+
+### R4.7 Required deliverables (PS §19) — definition of done
+
+| # | Deliverable | Covered by |
+|---|---|---|
+| 1 | Working application | M3–M5 |
+| 2 | Source repository with setup, dependencies, deployment instructions | M7, M9 (README per D3) |
+| 3 | Simulator integration | Done (client, probes, executor, controller) |
+| 4 | Intelligence component | LP optimizer (done) + detection and prediction (M3) |
+| 5 | Operator interface | M5 |
+| 6 | Architecture diagram: simulator → data/backend → intelligence → decision → application → monitoring | M9 (from R4.5) |
+| 7 | Reproducible deployment | M7 |
+| 8 | Observability evidence | M6 |
+| 9 | Resilience demonstration | M4 + live fault runs (devlog) |
+| 10 | Load-test evidence | M8 |
+| 11 | Final demo | M9, following PS §22 |
+
+### R4.8 Demo story (PS §22) mapped to features
+
+| PS §22 step | Feature |
+|---|---|
+| 1 Normal operations | Controller running; Overview |
+| 2 Operator dashboard | Overview + System health |
+| 3 Demand starts increasing | Lab injects `demand_spike` |
+| 4 System detects risk | Demand-anomaly detector + multiplier signal → alert |
+| 5 Intelligence predicts shortage | Projected stockout time and risk % |
+| 6 Allocation recommendation generated | Recommendation card (LP) |
+| 7 Operator inspects recommendation | Card: why, constraints, impact, confidence, alternatives |
+| 8 Allocation is simulated | What-if with/without |
+| 9 Crisis event occurs | Lab injects route disruption or combined crisis |
+| 10 System adapts | Disruption guard, alternative route, replan; incident timeline |
+| 11 Application or dependency failure injected | Lab injects simulator fault, or intelligence kill switch, or simulator container stopped |
+| 12 Monitoring detects failure | Health view + Grafana + alert |
+| 13 Fallback / recovery activates | Degraded mode with cached state; threshold fallback |
+| 14 Operations continue | Recovery incident; metrics back to normal |
+
 ### Navigation
 
+- [Revision 4 — official problem statement alignment](#revision-4--alignment-with-the-official-problem-statement)
 - [Product scope](#3-product-scope-and-definition-of-a-full-mvp)
 - [Documentation and simulator contract checks](#4-phase-0-documentation-discovery-and-contract-validation)
 - [Architecture and stack](#6-recommended-architecture-and-technology)
@@ -77,6 +230,8 @@ If the solver stops early with a feasible incumbent, display **“Feasible; opti
 
 ### 1.2 Phase boundary: no AI/ML now, AI/ML next
 
+> **Revision 4:** the problem statement makes Predict/Detect/Explain part of the required loop. Decision D1 (Revision 4, R4.3) proposes statistical stockout risk and rule-based detection now, with learned models and LLMs still in the next phase. Pending owner confirmation.
+
 **This phase completes every part of the MVP that requires no AI or machine learning.** Anything that would require AI/ML is deferred to the next phase (§25), not dropped. The deterministic system must be complete and scored on its own before that phase starts.
 
 | Where AI/ML would usually go | What this phase uses instead | Next phase (§25) |
@@ -90,6 +245,8 @@ If the solver stops early with a feasible incumbent, display **“Feasible; opti
 ## 2. Authority, requirements, and unresolved scope
 
 The supplied document explicitly says it is an **integration and interaction guide**. It does not supply the official participant brief, scoring weights, deliverables, mandatory technology, presentation length, or submission rules. Do not invent those requirements.
+
+> **Revision 4:** the official problem statement is now available (`Problem_Statement_BUP_CSE_Fest_2026.pdf`). It supplies the deliverables (PS §19) and evaluation weights (PS §23); see Revision 4. Evaluation horizon and scoring questions in §2.1 are answered there: judging is not based on a simulator score.
 
 This plan uses four labels:
 
@@ -1021,6 +1178,8 @@ Keep custom network SVG and domain charts inside this component system. Define s
 
 ### 13.2 Views
 
+> **Superseded by Revision 4 (R4.5):** five views covering all twelve PS §6 items.
+
 **Milestone 4 builds three views only:**
 
 | View | Required contents and actions |
@@ -1246,6 +1405,8 @@ Use deliberately small fixtures to test modeling errors. Do not reproduce the op
 
 ## 17. Implementation milestones and completion gates
 
+> **Revision 4:** Milestones 0–2 below are done. Milestones 3–5 are superseded by R4.6 (M3–M9).
+
 There is no imposed deadline, but the order is built around a **working slice**: a policy that ships fuel against the real simulator and produces a score exists from the first day of implementation. Plumbing, dashboard polish, and hardening come after the score exists, never before it.
 
 Each milestone ends with a runnable system and a recorded benchmark. Advance only when the gate passes.
@@ -1370,6 +1531,8 @@ No authentication platform is needed for a loopback-only MVP. If later deployed 
 
 ## 20. Demo and presentation plan
 
+> **Superseded by Revision 4 (R4.8):** follow the 14-step story from PS §22.
+
 The demonstration should prove an operating system and its evidence. Adapt length to the official participant brief when available.
 
 1. Show the official simulator connection, clock, current inventory, and service metrics.
@@ -1395,7 +1558,7 @@ Suggested evidence package:
 
 | Risk | Consequence | Mitigation / closure evidence |
 |---|---|---|
-| Missing participant brief | MVP might miss official deliverables or objective weights. | Obtain brief; map every explicit requirement before submission. |
+| Missing participant brief | MVP might miss official deliverables or objective weights. | **Resolved:** brief received; mapped in Revision 4 (R4.2, R4.7). |
 | Incorrect tick ordering | Optimizer uses stock too early or misses departures. | C02/C03 probes and independent trajectory tests. |
 | Demand model mismatch | Model-optimal plan performs poorly in actual runs. | Compare nominal projection with actual demand; expose discrepancy; fixed stress profiles. |
 | LP withholding service | False optimum that simulator cannot execute. | Time-decreasing unmet weights and no terminal reward (§9.4); replay check of `y = min(A, q)` on every plan. |
@@ -1412,6 +1575,8 @@ Suggested evidence package:
 | Incorrect “optimal” marketing | Claims exceed evidence. | Record exact model, objective, tolerance, solve status, and information assumptions. |
 
 ## 22. Final definition of done
+
+> **Revision 4:** the required deliverables in R4.7 (PS §19) are the primary definition of done; the checklist below still applies to integration safety.
 
 ### Integration and safety
 

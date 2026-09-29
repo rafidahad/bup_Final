@@ -47,22 +47,27 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 ## Current status
 
 - Date: 2026-09-29
-- **Scope rule (owner, 2026-09-29): execute only components that will not get AI/ML later** (plan §17 scope table). Projection, safety margins, decision policy tuning, crisis planning logic, and explanations are frozen and resumed in the AI/ML phase.
-- Milestones 0 and 1 done. Milestone 2 core done (LP policy, hindsight bound, C19); policy tuning frozen by the scope rule. Next: Milestone 3 non-AI/ML parts.
-- Code: `fuelops/sim.py` (client), `fuelops/probes.py`, `fuelops/execute.py` (snapshot + safe executor), `fuelops/policies.py` (none, threshold, lp), `fuelops/projection.py` (demand formula), `fuelops/lp.py` (LP), `fuelops/hindsight.py` (upper bound + C19), `fuelops/harness.py` (stepped benchmark), `tests/test_lp.py` (4 fixtures, passing), `compose.yaml`.
-- Best measured score so far: **LP, 7 simulated days: service level 0.8504, 97,423 L unmet — within 9 L of the perfect-hindsight bound (97,414 L)** (run `dac33beb`).
+- **Official problem statement received → plan Revision 4.** Execution paused until the owner answers D1–D4 (plan R4.3).
+- Scope rule (owner, earlier today): execute only components that will not get AI/ML later. Revision 4 D1 proposes adjusting it for Predict/Detect (statistical, not ML) — pending.
+- Done: Milestones 0–2, all contract probes except C11, fault retries, disruption guard, live controller, API skeleton.
+- Code: `fuelops/sim.py`, `probes.py`, `execute.py`, `policies.py`, `projection.py`, `lp.py`, `hindsight.py`, `harness.py`, `scenarios.py`, `controller.py`, `livetest.py`, `api.py`; `tests/test_lp.py` (4 passing); `compose.yaml`.
+- Best measured decision quality: **LP, 7 simulated days (stepped): service 0.8504, 97,417 L unmet — 3 L from the perfect-hindsight bound** (run `b982151b`). Live, threshold is more robust (see Log).
 
-## Milestones (plan §17)
+## Milestones (plan Revision 4, R4.6)
 
 | # | Milestone | Status |
 |---|---|---|
-| 0 | Supply adequacy (C00) + blocking probes C01–C04, C06, C10, C15 | Done |
-| 1 | Working slice: threshold policy, auto, stepped harness, score | Done |
-| 2 | LP planner + hindsight bound | Core done; tuning frozen (AI/ML target) |
-| 3 | Events + fault handling (non-AI/ML parts only) | Next |
-| 4 | Dashboard: Overview, Shipments, Plans | Not started |
-| 5 | Hardening and delivery | Not started |
-| — | Next phase: AI/ML extensions (plan §25) | Deferred — not this phase |
+| 0 | Supply adequacy (C00) + contract probes | Done |
+| 1 | Working slice: threshold policy, executor, stepped harness | Done |
+| 2 | LP planner + hindsight bound | Done (stepped); live needs safety buffer (D4) |
+| M3 | Decision-support core: detectors, stockout risk, recommendation cards, what-if, approval queue, audit | Waiting for owner go-ahead |
+| M4 | Resilience behaviours (PS §11 mappings) | Partly done (retries, disruption guard, reset detection, degraded flag) |
+| M5 | Operator web app (5 views + lab) | Not started (API skeleton exists) |
+| M6 | Observability: Prometheus, Grafana, logs, health | Not started |
+| M7 | DevOps: Dockerfile, full compose, CI | Not started (simulator compose only) |
+| M8 | Load testing (k6) | Not started |
+| M9 | Architecture diagram, README, demo script, final check | Not started |
+| Next | Learned forecast, LLM explanations, tuning (plan §25) | Deferred |
 
 ## Simulator semantics (verified by probes)
 
@@ -98,7 +103,8 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 
 ## Open questions / blockers
 
-- Participant brief (evaluation horizon, scoring) not available. With only ~5.9 days of fuel, run length decides how much unmet demand is unavoidable.
+- Participant brief received (PS). **Judging is not a simulator score** (PS §23 weights: product 20, intelligence 20, architecture 15, DevOps 15, resilience 10, observability 10, demo 10).
+- Owner decisions D1–D4 pending (plan R4.3): Predict/Detect scope, time remaining, README for setup, live policy.
 - C11 (demand timing/factor composition) left for the AI/ML phase with the residual report (projection is a frozen component).
 
 ## Results (stepped, baseline scenario, seed 12345, no events, default 15-min tick)
@@ -121,12 +127,30 @@ LP solve time: 84 solves, p50 0.17 s, max 0.39 s, all optimal. **Issue:** LP sen
 
 "Fuel lost" = start stock + arrived supply − served − (depot + station + in-transit stock) at the end; with no shipping the depots overflow at supply arrivals. 7 days exceeds the ~5.9-day fuel ceiling (C00), so some unmet demand is unavoidable there; the hindsight bound (Milestone 2) will show how much.
 
-## Next up (non-AI/ML only)
+### Live fault runs (normal speed 8 ticks/s, threshold policy, 400 ticks ≈ 4.2 days, fault injected at 10 s for 15 s)
 
-1. Fault handling: degraded mode (plan §12.1), retries/backoff, SSE consumer with polling fallback, event-triggered replan; F01–F05 scenarios.
-2. Milestone 4 dashboard; Milestone 5 persistence/outbox/packaging.
+| Fault | Service | Unmet (L) | FAILED | Incidents logged |
+|---|---:|---:|---:|---|
+| none | 1.0000 | 0 | 0 | — |
+| latency 500 ms | 1.0000 | 0 | 0 | — |
+| unavailable | 0.9336 | 25,393 | 0 | degraded → recovered |
+| error_rate 0.25 | 1.0000 | 0 | 0 | 3× degraded → recovered |
+| stale_data | 1.0000 | 0 | 0 | 61 stale flags (data used, C15) |
+| stream_disconnect | 1.0000 | 0 | 0 | — (REST polling unaffected) |
+
+`unavailable` blocks every `/v1` call including POSTs for ~120 ticks, so the loss is only preventable by holding more stock beforehand. Live runs are wall-clock based and not byte-identical; single runs, not distributions yet.
+
+## Next up
+
+- Get owner answers to D1–D4 (plan R4.3), then execute R4.6 in order: M3 → M5 → M7 → M6 → M4 → M8 → M9.
 
 ## Log
+
+### 2026-09-29 — Official problem statement received; plan Revision 4
+- Read `Problem_Statement_BUP_CSE_Fest_2026.pdf` (11 pages) in full and added it to the repo.
+- Key change: evaluation is product/intelligence/architecture/DevOps/resilience/observability/demo, not simulator service level. Load testing, observability, CI/CD, architecture diagram, and an operator web app are required deliverables.
+- Plan Revision 4 added: facts (R4.1), gap analysis (R4.2), owner decisions D1–D4 (R4.3), recommendation card (R4.4), architecture + 5 views (R4.5), milestones M3–M9 (R4.6), deliverable checklist (R4.7), PS §22 demo mapping (R4.8). Superseded sections marked.
+- Execution paused until the owner confirms.
 
 ### 2026-09-29 — Fault handling, live controller, API skeleton (before problem statement arrived)
 - `sim.py`: GET retries with backoff on 503/transport errors. `execute.py`: parallel snapshot (8 reads in one round trip — latency fault costs one delay, not eight), events in snapshot, **route-disruption guard** (never POST on a route disrupted now/next tick; C08/C18: fuel would be lost).

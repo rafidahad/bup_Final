@@ -42,6 +42,10 @@ docker compose up -d                      # simulator on http://localhost:18000 
 .venv/Scripts/python.exe -m fuelops.harness threshold none --ticks 672   # stepped benchmark → reports/
 ```
 
+Full stack: `docker compose up -d --build` → app http://localhost:8100, Grafana http://localhost:3300, Prometheus :9090, simulator :18000 (all 127.0.0.1).
+
+Production (Dokploy on VPS, 2 core / 8 GB, x86_64 required — simulator image is amd64 only): Compose service from this repo, env pasted from `.env.production` (gitignored, generated locally; template `.env.example`). Domains in Dokploy's Domains tab: `tae.rafidahad.me` → fuelops:8100, `tae-grafana.rafidahad.me` → grafana:3000. Never expose simulator (`/admin` has no auth) or Prometheus. Cloudflare proxy off (DNS only) so Traefik gets Let's Encrypt certs.
+
 Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). Deps: `requirements.txt`.
 
 ## Current status
@@ -95,6 +99,7 @@ Python venv: `.venv` (created from `%LOCALAPPDATA%\Programs\Python\Python312`). 
 
 ## Decisions
 
+- 2026-09-29 — Grafana host port 3300 (was 3000) because Dokploy's panel uses 3000; `GF_SERVER_ROOT_URL` from `GRAFANA_ROOT_URL`. Subdomains: `tae` (app), `tae-grafana`, `dokploy` (panel). Production mode `auto`.
 - 2026-09-29 — `lp-buffer` = 48 h horizon + 8 h buffer (was 24 h + 4 h): 64% less unmet over 17 crisis recipes, same 7-day result (see Results).
 - 2026-09-29 — Owner answered D1–D4 (plan R4.3); < 24 h to judging → 24-hour cut order.
 
@@ -227,6 +232,12 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 - Execute the 24-hour cut (plan R4.3): M3 → M5 → M7 → M6 → M4 → M8 → M9.
 
 ## Log
+
+### 2026-09-29 — Deployment prep (Dokploy) + gitignore
+- Stack verified on Linux: `docker compose up -d --build` → all services healthy; 5/5 tests pass in the image; ~240 MB RAM total.
+- `compose.yaml`: Grafana on host 3300, `GF_SERVER_ROOT_URL`. `.env.example` rewritten (comments on own lines, `GRAFANA_ROOT_URL`). `.env.production` generated with random token/password (gitignored, mode 600). `.gitignore`: `.env.*` except example, `.pytest_cache`, `.kilo/`, editor/OS files. `.dockerignore`: `.env*`.
+- Verified: `docker compose config` OK; Grafana answers on 3300; `git check-ignore` covers `.env`, `.env.production`.
+- **Open before going public:** approve/reject/cancel endpoints (`fuelops/api.py` L264/277/286) have no operator-token guard; Dokploy deploy job (`/api/compose.deploy` after CI passes) not added.
 
 ### 2026-09-29 — `lp-buffer` default changed to 48 h horizon, 8 h buffer
 - Goal: best automated score on an unknown image (other seed / events). Ran the crisis suite plus 6 hold-out recipes for threshold and four LP settings (89 stepped runs) and a live check; results in **Crisis comparison and horizon/buffer sweep** above.

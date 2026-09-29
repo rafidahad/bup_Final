@@ -1,9 +1,28 @@
+# Python
 .venv/
 __pycache__/
-reports/
 *.pyc
+.pytest_cache/
+
+# Runtime output (benchmark reports, SQLite decision store)
+reports/
 data/
 *.db
+
+# Secrets: only the example is committed
 .env
+.env.*
+!.env.example
+
+# Web build
 web/node_modules/
 web/dist/
+
+# Local tool / editor / OS state
+.kilo/
+.claude/settings.local.json
+.idea/
+.vscode/
+*.log
+.DS_Store
+Thumbs.db

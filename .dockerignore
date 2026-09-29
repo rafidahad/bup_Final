@@ -7,3 +7,5 @@ web/node_modules
 web/dist
 **/__pycache__
 *.pdf
+.env
+.env.*

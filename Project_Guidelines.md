@@ -465,7 +465,7 @@ CI runs on pull requests and pushes to main. It tests and smoke-deploys the stac
 | SIM_PORT | 18000 | Host simulator port |
 | APP_PORT | 8100 | Host application port |
 | FUELOPS_POLICY | lp-buffer | Selected planning policy |
-| FUELOPS_MODE | manual | observe, manual, or auto |
+| FUELOPS_MODE | auto | observe, manual, or auto |
 | FUELOPS_OPERATOR_TOKEN | empty | Optional token for currently protected controls |
 | PROMETHEUS_PORT | 9090 | Host monitoring port |
 | GRAFANA_PORT | 3000 | Host dashboard port |

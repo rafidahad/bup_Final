@@ -235,6 +235,9 @@ Evidence to have open: Results and Load testing sections of this log, the hindsi
 
 ## Log
 
+### 2026-09-29 — Default operating mode = auto
+- `compose.yaml`, `.env.example`, `fuelops/api.py`, README, Project_Guidelines: `FUELOPS_MODE` defaults to `auto` (was `manual`, which ships nothing without an operator — an automated scorer would see almost no deliveries). Low-confidence cards still wait for review (PS §24). The production server env already sets `auto`.
+
 ### 2026-09-29 — Event-aware LP (route windows, future spikes, scheduled supply changes)
 - `projection.py`: `route_closed_ticks` (public disruption windows; disrupted with no visible end = whole horizon), `multiplier_change` (scheduled spikes inside their window, active spikes divided out after their end; filters AND, empty = all), `supply_after_events` (scheduled delay/shortfall applied to not-yet-arrived rows, C13). `lp.py` uses all three (outage windows were already there).
 - Bench, 17 recipes × 5 days: **surprise 23,783 → 21,291 L; announced 19,066 L** — every remaining liter is inside an outage window (s10, h3), so unavoidable (C09). 25 tests pass (3 new).

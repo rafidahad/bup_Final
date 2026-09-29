@@ -35,7 +35,7 @@ Stop with `docker compose down` (add `-v` to also delete the decision history vo
 | `SIMULATOR_START_MODE` | paused | `paused` or `running` |
 | `SIM_PORT` / `APP_PORT` | 18000 / 8100 | Host ports (8000 is often reserved on Windows) |
 | `FUELOPS_POLICY` | lp-buffer | Planner: `lp-buffer` (optimizer with safety stock), `lp`, `threshold` (rule fallback) |
-| `FUELOPS_MODE` | manual | `observe` (read only), `manual` (operator approves), `auto` (confident recommendations are sent; low confidence waits for review) |
+| `FUELOPS_MODE` | auto | `observe` (read only), `manual` (operator approves), `auto` (confident recommendations are sent; low confidence waits for review) |
 | `FUELOPS_OPERATOR_TOKEN` | empty | When set, lab controls, mode and planner changes require this token |
 | `GRAFANA_ADMIN_PASSWORD` | change-me | Grafana admin login |
 | `GRAFANA_PORT` | 3300 | Grafana host port (3000 is taken by Dokploy's panel) |

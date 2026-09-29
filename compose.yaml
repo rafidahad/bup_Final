@@ -33,7 +33,7 @@ services:
     environment:
       SIM_URL: http://simulator-api:8000
       FUELOPS_POLICY: ${FUELOPS_POLICY:-lp-buffer}
-      FUELOPS_MODE: ${FUELOPS_MODE:-manual}
+      FUELOPS_MODE: ${FUELOPS_MODE:-auto}
       FUELOPS_OPERATOR_TOKEN: ${FUELOPS_OPERATOR_TOKEN:-}
       FORECAST_ENABLED: ${FORECAST_ENABLED:-true}
       FORECAST_URL: http://forecaster:8200

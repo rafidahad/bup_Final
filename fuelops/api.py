@@ -1,7 +1,7 @@
 """Application API (plan §14, Revision 4) for the operator web app. Application-owned /api/* only.
 
 Run: uvicorn fuelops.api:app --port 8100
-Env: SIM_URL, FUELOPS_POLICY (lp-buffer), FUELOPS_MODE (manual — human review by default, PS §24),
+Env: SIM_URL, FUELOPS_POLICY (lp-buffer), FUELOPS_MODE (auto; low-confidence recommendations still wait for review, PS §24),
      FUELOPS_OPERATOR_TOKEN (when set, required as X-Operator-Token for sensitive actions, PS §18),
      FUELOPS_AUTOSTART (1 = start the controller thread; tests set 0).
 """
@@ -39,7 +39,7 @@ RECENT = deque(maxlen=2000)  # (latency seconds, is_error) for p95 / error rate 
 async def lifespan(_app):
     global ctl
     ctl = Controller(policy=os.environ.get("FUELOPS_POLICY", "lp-buffer"),
-                     mode=os.environ.get("FUELOPS_MODE", "manual"))
+                     mode=os.environ.get("FUELOPS_MODE", "auto"))
     if os.environ.get("FUELOPS_AUTOSTART", "1") == "1":
         ctl.start()  # the one operational writer (plan §6.1)
     yield
